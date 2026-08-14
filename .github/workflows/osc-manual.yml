@@ -1,0 +1,328 @@
+name: osc-manual
+
+# Manual dispatch wrapper used to run this repository's CI job steps against an
+# arbitrary ref of this fork, before anything is proposed upstream.
+#
+# It lives on the fork's DEFAULT branch (`develop`) because GitHub only honours
+# `workflow_dispatch` from the default branch, and it is never added to a feature
+# branch. Every dispatch therefore runs THIS definition, whatever `target_ref` is —
+# so any step depending on a file that only some refs carry is guarded below and
+# prints a loud `WRAPPER-SKIP:` line rather than passing quietly.
+#
+# The job steps mirror `.github/workflows/ci.yml`. That mirror can drift from
+# upstream; the `Show checked-out ref` step is what makes a run's verdict
+# attributable, because a dispatch run reports `head_branch`/`head_sha` of the
+# default branch this file lives on, never the tree it checked out.
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Ref of this fork to check out and test
+        required: true
+
+jobs:
+  lint-format:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: uv run ruff check .
+      - name: Check formatting
+        if: ${{ !cancelled() }}
+        run: uv run ruff format --check .
+
+  fast-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12.0", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Run fast tests
+        if: ${{ !cancelled() }}
+        run: uv run pytest -m "not slow and not browser" -v
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12.0", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Install Playwright browser
+        if: ${{ !cancelled() }}
+        run: uv run playwright install --with-deps chromium
+      - name: Run browser tests
+        if: ${{ !cancelled() }}
+        run: uv run pytest -m browser --run-browser -v
+
+  external-validation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12.0", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Run external-validation suite
+        if: ${{ !cancelled() }}
+        env:
+          WRAPPER_TARGETS: >-
+            tests/test_committee_report.py
+            tests/test_validate_extraction.py
+        run: |
+          # The wrapper is shared by every target_ref, so a target named here may not
+          # exist on the ref under test. Skip it LOUDLY (grep for WRAPPER-SKIP) instead
+          # of letting pytest error out or, worse, exiting 0 on an empty selection.
+          present=""
+          missing=0
+          for f in $WRAPPER_TARGETS; do
+            if [ -f "$f" ]; then
+              present="$present $f"
+            else
+              missing=$((missing + 1))
+              echo "WRAPPER-SKIP: $f is absent on this ref; upstream CI runs it, this run does not"
+            fi
+          done
+          echo "WRAPPER-SKIP-COUNT: $missing"
+          if [ -z "$present" ]; then
+            echo "::error::WRAPPER-SKIP: every target for this step is absent on this ref"
+            exit 1
+          fi
+          uv run pytest -v -m slow $present
+
+  corpus-gates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12.0", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Run corpus correctness gates (committed manifest)
+        if: ${{ !cancelled() }}
+        env:
+          WRAPPER_TARGETS: >-
+            tests/test_corpus_properties.py
+            tests/test_corpus_tree_properties.py
+            tests/test_diff_validation.py
+            tests/test_node_join_corpus.py
+            tests/test_xml_subsection_nodes.py
+            tests/test_pdf_subsection_recall.py
+            tests/test_manifest_report_fixtures.py
+            tests/test_financial_callout_whole_item.py
+            tests/test_canonical_baseline.py
+            tests/test_matching_contracts.py
+            tests/test_assignment_classification_boundary.py
+            tests/test_round1_preservation.py
+        run: |
+          # The wrapper is shared by every target_ref, so a target named here may not
+          # exist on the ref under test. Skip it LOUDLY (grep for WRAPPER-SKIP) instead
+          # of letting pytest error out or, worse, exiting 0 on an empty selection.
+          present=""
+          missing=0
+          for f in $WRAPPER_TARGETS; do
+            if [ -f "$f" ]; then
+              present="$present $f"
+            else
+              missing=$((missing + 1))
+              echo "WRAPPER-SKIP: $f is absent on this ref; upstream CI runs it, this run does not"
+            fi
+          done
+          echo "WRAPPER-SKIP-COUNT: $missing"
+          if [ -z "$present" ]; then
+            echo "::error::WRAPPER-SKIP: every target for this step is absent on this ref"
+            exit 1
+          fi
+          uv run pytest -v -m slow $present
+
+  packaging-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12.0", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Run packaging gate (build, install, diff from outside the checkout)
+        if: ${{ !cancelled() }}
+        env:
+          WRAPPER_TARGETS: tests/test_engine_installs.py
+        run: |
+          # The wrapper is shared by every target_ref, so a target named here may not
+          # exist on the ref under test. Skip it LOUDLY (grep for WRAPPER-SKIP) instead
+          # of letting pytest error out or, worse, exiting 0 on an empty selection.
+          present=""
+          missing=0
+          for f in $WRAPPER_TARGETS; do
+            if [ -f "$f" ]; then
+              present="$present $f"
+            else
+              missing=$((missing + 1))
+              echo "WRAPPER-SKIP: $f is absent on this ref; upstream CI runs it, this run does not"
+            fi
+          done
+          echo "WRAPPER-SKIP-COUNT: $missing"
+          if [ -z "$present" ]; then
+            echo "::error::WRAPPER-SKIP: every target for this step is absent on this ref"
+            exit 1
+          fi
+          uv run pytest -v -m slow $present
+
+  remaining-slow:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12.0", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Run remaining slow suites (committed fixtures)
+        if: ${{ !cancelled() }}
+        env:
+          WRAPPER_TARGETS: >-
+            tests/test_pdf_corpus_smoke.py
+            tests/test_bill_tree.py
+            tests/test_structure_tree.py
+            tests/test_diff_bill.py
+            tests/test_pdf_compare.py
+            tests/test_financial_diff.py
+            tests/test_pipeline_parity.py
+            tests/test_pdf_xml_amount_recall.py
+            tests/test_pdf_xml_prose_recall.py
+            tests/test_front_matter_parity.py
+            tests/test_xml_compare.py
+            tests/test_toc_tree.py
+            tests/test_format_html.py
+            tests/test_manifest_report_fixtures.py
+            tests/test_canonical_tree.py
+            tests/test_reconcile.py
+            tests/test_pdf_watermark_recall.py
+            tests/test_formatters_text_serializer.py
+            tests/test_pdf_xml_withheld_recall.py
+        run: |
+          # The wrapper is shared by every target_ref, so a target named here may not
+          # exist on the ref under test. Skip it LOUDLY (grep for WRAPPER-SKIP) instead
+          # of letting pytest error out or, worse, exiting 0 on an empty selection.
+          present=""
+          missing=0
+          for f in $WRAPPER_TARGETS; do
+            if [ -f "$f" ]; then
+              present="$present $f"
+            else
+              missing=$((missing + 1))
+              echo "WRAPPER-SKIP: $f is absent on this ref; upstream CI runs it, this run does not"
+            fi
+          done
+          echo "WRAPPER-SKIP-COUNT: $missing"
+          if [ -z "$present" ]; then
+            echo "::error::WRAPPER-SKIP: every target for this step is absent on this ref"
+            exit 1
+          fi
+          uv run pytest -v -m slow $present
