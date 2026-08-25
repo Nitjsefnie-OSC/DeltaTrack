@@ -45,6 +45,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: uv run ruff format --check .
 
+  pip-audit:
+    name: pip-audit (production deps)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref }}
+      - name: Show checked-out ref
+        run: |
+          echo "checked-out SHA: $(git rev-parse HEAD)"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install
+      - name: Export production requirements
+        run: >
+          uv export --frozen --no-default-groups --group web --group fetch
+          --no-emit-project --format requirements-txt -o requirements-prod.txt
+      - name: Audit dependencies
+        run: uvx pip-audit -r requirements-prod.txt
+
   fast-tests:
     runs-on: ubuntu-latest
     permissions:
@@ -186,11 +209,18 @@ jobs:
             tests/test_xml_subsection_nodes.py
             tests/test_pdf_subsection_recall.py
             tests/test_manifest_report_fixtures.py
-            tests/test_financial_callout_whole_item.py
             tests/test_canonical_baseline.py
+            tests/test_pdf_canonical_baseline.py
+            tests/test_pdf_matching_boundary.py
+            tests/test_pdf_observation_emission.py
+            tests/test_pdf_observation_identity.py
+            tests/test_pdf_round1_retrieval.py
+            tests/test_pdf_round1_revocation.py
+            tests/test_pdf_round2_stages.py
             tests/test_matching_contracts.py
             tests/test_assignment_classification_boundary.py
-            tests/test_round1_preservation.py
+            tests/test_round1_stages.py
+            tests/test_round1_pairing_sentinel.py
         run: |
           # The wrapper is shared by every target_ref, so a target named here may not
           # exist on the ref under test. Skip it LOUDLY (grep for WRAPPER-SKIP) instead
@@ -211,6 +241,43 @@ jobs:
             exit 1
           fi
           uv run pytest -v -m slow $present
+
+  # The fork wrapper reports the same stable test verdict as upstream CI, while
+  # additionally requiring the target-ref dependency audit. if: always() makes a
+  # skipped or failed dependency visible instead of suppressing this final verdict.
+  test:
+    needs: [lint-format, fast-tests, browser-tests, external-validation, corpus-gates, packaging-gate, remaining-slow, pip-audit]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every dependent job to have succeeded
+        env:
+          LINT_FORMAT_RESULT: ${{ needs.lint-format.result }}
+          FAST_TESTS_RESULT: ${{ needs.fast-tests.result }}
+          BROWSER_TESTS_RESULT: ${{ needs.browser-tests.result }}
+          EXTERNAL_VALIDATION_RESULT: ${{ needs.external-validation.result }}
+          CORPUS_GATES_RESULT: ${{ needs.corpus-gates.result }}
+          PACKAGING_GATE_RESULT: ${{ needs.packaging-gate.result }}
+          REMAINING_SLOW_RESULT: ${{ needs.remaining-slow.result }}
+          PIP_AUDIT_RESULT: ${{ needs.pip-audit.result }}
+        run: |
+          for result in \
+            "$LINT_FORMAT_RESULT" \
+            "$FAST_TESTS_RESULT" \
+            "$BROWSER_TESTS_RESULT" \
+            "$EXTERNAL_VALIDATION_RESULT" \
+            "$CORPUS_GATES_RESULT" \
+            "$PACKAGING_GATE_RESULT" \
+            "$REMAINING_SLOW_RESULT" \
+            "$PIP_AUDIT_RESULT"; do
+            if [ "$result" != "success" ]; then
+              echo "::error::A required job result is '$result', not 'success'"
+              exit 1
+            fi
+          done
+          echo "All required jobs succeeded."
 
   packaging-gate:
     runs-on: ubuntu-latest
