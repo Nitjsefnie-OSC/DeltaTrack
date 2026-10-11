@@ -896,6 +896,41 @@ def test_every_section_reaches_a_node(xml_path: Path) -> None:
     )
 
 
+_AMENDMENT_BLOCKS = ".//engrossed-amendment-body/amendment/amendment-block"
+_AMENDMENT_DOCS = [p for p in ALL_XML_FILES if p.exists() and ET.parse(p).getroot().tag == "amendment-doc"]
+
+
+@pytest.mark.parametrize("xml_path", _AMENDMENT_DOCS, ids=[_xml_id(p) for p in _AMENDMENT_DOCS])
+def test_every_amendment_section_reaches_a_node(xml_path: Path) -> None:
+    """Every section an engrossed amendment inserts reaches a node, in every block (#788).
+
+    ``test_every_section_reaches_a_node`` checks only enacted sections, and treats an
+    amendment's whole body as proposed text, so it asserts nothing here. This is the check
+    for an amendment's own text: every ``<section>`` of every ``<amendment-block>``,
+    selected here rather than through the parser's body selector (a gate that asked the
+    selector which blocks exist could not see it skip one). A section quoted inside
+    another's amendment ("139F." of the Internal Revenue Code) is that section's text,
+    not a node, and is excluded. 114-hr-2029 v6 used to reach 1,207 of its 1,335, missing
+    all of Division Q in its second block (#836).
+    """
+    root = ET.parse(xml_path).getroot()
+    sections = []
+    for block in root.findall(_AMENDMENT_BLOCKS):
+        quoted = {id(s) for q in block.iter("quoted-block") for s in q.iter("section")}
+        sections += [s for s in block.iter("section") if id(s) not in quoted]
+    assert sections, f"{_xml_id(xml_path)}: no amendment section found; this check asserts nothing"
+    node_ids = {node.element_id for node in parsed_bill(xml_path).nodes}
+    missing = [s.get("id") for s in sections if s.get("id") not in node_ids]
+    assert not missing, (
+        f"{_xml_id(xml_path)}: {len(missing)} of {len(sections)} amendment sections reach no node: {missing[:5]}"
+    )
+
+
+def test_the_amendment_section_check_sees_the_corpus() -> None:
+    """The committed corpus holds ten engrossed amendments; the check above must see them."""
+    assert len(_AMENDMENT_DOCS) >= 10, [_xml_id(p) for p in _AMENDMENT_DOCS]
+
+
 def test_section_coverage_gate_sees_the_corpus() -> None:
     """Fail-closed floor for ``test_every_section_reaches_a_node``.
 
