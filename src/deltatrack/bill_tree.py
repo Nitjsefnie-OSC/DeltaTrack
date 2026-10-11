@@ -197,10 +197,19 @@ def find_bill_bodies(root: ET.Element) -> list[ET.Element]:
     amendment block is a body, in document order, for the same reason: taking the first
     dropped the rest (#836; 114-hr-2029 v6 lost Division Q, 128 sections of its own).
     Each block is read as text following the one before it; its instruction is not
-    interpreted. That is right for "insert" and "At the end of … insert", the only
-    instructions in the committed corpus. A later amendment that strikes or replaces part
-    of an earlier one would read as both texts, with nothing marking the struck one, as
-    #434's two-text bills read today. Like #434, this only guarantees no text is dropped.
+    interpreted. That is right where the blocks are consecutive pieces of one inserted
+    text: "In lieu of … insert" or "Strike all … and insert", continued by blocks whose
+    instruction is blank (117-hr-2471 v5, 115-hr-244 v5), "At the end of … insert", and
+    partial strikes that together replace every section in order. It is not right where
+    the blocks are edits to scattered parts of a larger text ("Strike section 5 and
+    insert…", page-and-line amendments): an engrossed amendment carries only the
+    replacements, so the version reads as those fragments and a comparison treats them as
+    the whole bill. That was as wrong when only the first block was read.
+
+    Only a block's sections and the levels above them become nodes, so a block that holds
+    a fragment below section level (a subsection, a paragraph, a lone quoted block) or a
+    preamble still reaches no node. Measured over the 113th-119th Congresses' 449
+    engrossed amendments (2026-10-11, on PR #837).
 
     Falls back to ``find_bill_body`` for the resolution shape, which is single-body (and,
     for paired resolution variants, still fails loudly per #427).
