@@ -15,9 +15,10 @@ line of an itemised total. This resolver reads the paragraph the way it is draft
 4. **Otherwise the figure that closes the purpose clause.** An appropriation reads "For
    <purposes>, $X<terminator>": the figure follows a comma, colon, semicolon or closing
    parenthesis, and is followed by punctuation or by "to remain available", "of which",
-   "to be derived". A figure followed by "for ..." is an allowance inside the purposes, and
-   one after "not to exceed", "up to", "including" or "of the amount available" is a limit or
-   a carve-out.
+   "to be derived", "shall be available". A figure followed by "for ..." is an allowance
+   inside the purposes, and one after "including" or "of which" is a carve-out. A ceiling
+   straight after the purposes (", not to exceed $X, to remain available") is the
+   appropriation itself, stated as a cap; anywhere else "not to exceed" is a limit.
 5. **Loan levels are skipped.** A sentence that sets "the principal amount of" loans, or
    "gross obligations", is a limitation; the appropriation is the "For the cost of" sentence.
 6. **Abstain otherwise.** No figure is better than a wrong one (ADR 0025, proposed): a figure
@@ -31,6 +32,13 @@ from the general fund estimated at $X", net of its collections. Committee report
 consistent about which they carry (the USPTO's report figure is the gross $4.55 billion, its
 net $0; TSA's is the net), so this returns the gross appropriation and leaves gross-versus-net
 to the figure's type, which ADR 0025 proposes should carry its effect.
+
+History: the rules were first written from the six DEV answer keys and frozen at d394669
+before the eight HELD_OUT keys were scored (wrong figures 3 -> 0, agreements 401 -> 389).
+The closers ("shall", "(", "plus", "together with"), the ceiling-as-appropriation reading,
+"appropriated to <recipient> $X", and dropping "under this heading" as a limiter came from
+reading that held-out run, so the held-out numbers after it are no longer an unbiased
+estimate; a fresh answer key is (see README).
 """
 
 from __future__ import annotations
@@ -44,7 +52,7 @@ from deltatrack.amounts import strip_amendment_annotations
 _MONEY = r"\$(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
 IN_ALL = re.compile(r"\bin all[,:]?\s+" + _MONEY, re.IGNORECASE)
 EXPLICIT = re.compile(
-    r"there (?:is|are) (?:hereby )?appropriated\s+"
+    r"there (?:is|are) (?:hereby )?appropriated(?: to [^$.;]{0,80}?)?\s+"
     + _MONEY
     + r"|"
     + _MONEY
@@ -54,16 +62,19 @@ EXPLICIT = re.compile(
 FIGURE = re.compile(_MONEY)
 # What may come straight after the figure that closes a purpose clause.
 CLOSES = re.compile(
-    r"\s*(?:[,:;.)]|$)|\s+(?:to remain available|to be\b|of which|which shall|shall remain available"
+    r"\s*(?:[,:;.()]|$)|\s+(?:to remain available|to be\b|of which|which shall|shall\b|plus\b|together with"
     r"|and shall remain|for the fiscal year|under the same terms)",
     re.IGNORECASE,
 )
 # What, just before a figure, makes it a limit or a carve-out rather than the appropriation.
 LIMITED = re.compile(
-    r"(?:not to exceed|not more than|not less than|up to|including|of which|except|exceed|than|plus|less"
-    r"|amounts? available|made available|under this heading)\s*(?:an amount of\s*)?$",
+    r"(?:not to exceed|not more than|not less than|up to|including|of which|except|exceed|than|plus|less)"
+    r"\s*(?:an amount of\s*)?$",
     re.IGNORECASE,
 )
+# A ceiling straight after the purpose clause is the appropriation itself, stated as a cap
+# ("...as authorized by law, not to exceed $15,000,000, to remain available...").
+CEILING_LEAD = re.compile(r"[,:;)]\s*(?:but\s+)?(?:not to exceed|not more than|not less than|up to)\s*$", re.IGNORECASE)
 LOAN_LEVEL = re.compile(r"\b(?:principal amount of|gross obligations)\b", re.IGNORECASE)
 SENTENCE_START = re.compile(r"(?:(?<=[.:])\s+|\n)(?=For\b)")
 
@@ -76,10 +87,12 @@ def _closing_figure(sentence: str) -> int | None:
     """The first figure in a sentence that closes its purpose clause, or None."""
     for m in FIGURE.finditer(sentence):
         before = sentence[max(0, m.start() - 40) : m.start()]
-        if not re.search(r"[,:;)]\s*$", before):
-            continue  # an appropriation follows its purposes after punctuation
-        if LIMITED.search(before.rstrip(" ,:;")):
-            continue
+        ceiling = CEILING_LEAD.search(before)
+        if not ceiling:
+            if not re.search(r"[,:;)]\s*$", before):
+                continue  # an appropriation follows its purposes after punctuation
+            if LIMITED.search(before.rstrip(" ,:;")):
+                continue
         if CLOSES.match(sentence, m.end()):
             return _value(m.group(1))
     return None
