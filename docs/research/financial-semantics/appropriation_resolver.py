@@ -1,0 +1,106 @@
+"""Pick the one figure an appropriations paragraph appropriates, or abstain.
+
+`classify_bill` types a paragraph by its opening and then takes the first dollar figure it
+finds. Measured against committee reports (`committee_agreement.py`), that figure is often
+one the paragraph mentions on the way to its appropriation: an allowance inside the purpose
+clause ("including up to $32,500,000 for payments to State agencies"), a loan level, or one
+line of an itemised total. This resolver reads the paragraph the way it is drafted instead:
+
+1. **An explicit total wins.** "...; in all, $3,476,000." and "In all: $37,023,244,000" state
+   the account's total after itemising it.
+2. **The appropriation comes before the provisos.** Text after the first "Provided, That"
+   qualifies money already appropriated, so no figure there is the appropriation.
+3. **An explicit appropriating verb.** "$24,000,000 is hereby appropriated", "there is
+   appropriated $600,000,000": the general-provision form.
+4. **Otherwise the figure that closes the purpose clause.** An appropriation reads "For
+   <purposes>, $X<terminator>": the figure follows a comma, colon, semicolon or closing
+   parenthesis, and is followed by punctuation or by "to remain available", "of which",
+   "to be derived". A figure followed by "for ..." is an allowance inside the purposes, and
+   one after "not to exceed", "up to", "including" or "of the amount available" is a limit or
+   a carve-out.
+5. **Loan levels are skipped.** A sentence that sets "the principal amount of" loans, or
+   "gross obligations", is a limitation; the appropriation is the "For the cost of" sentence.
+6. **Abstain otherwise.** No figure is better than a wrong one (ADR 0025, proposed): a figure
+   typed as an appropriation is one a reader will add up.
+
+Only a paragraph `classify_bill` types as an appropriation is read, so this changes which
+figure is chosen, never what counts as an appropriating paragraph.
+
+Why not the net figure: a fee-funded account also states "a final fiscal year appropriation
+from the general fund estimated at $X", net of its collections. Committee reports are not
+consistent about which they carry (the USPTO's report figure is the gross $4.55 billion, its
+net $0; TSA's is the net), so this returns the gross appropriation and leaves gross-versus-net
+to the figure's type, which ADR 0025 proposes should carry its effect.
+"""
+
+from __future__ import annotations
+
+import re
+
+import classify_bill as cb
+
+from deltatrack.amounts import strip_amendment_annotations
+
+_MONEY = r"\$(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+IN_ALL = re.compile(r"\bin all[,:]?\s+" + _MONEY, re.IGNORECASE)
+EXPLICIT = re.compile(
+    r"there (?:is|are) (?:hereby )?appropriated\s+"
+    + _MONEY
+    + r"|"
+    + _MONEY
+    + r"\s+(?:is|are) (?:hereby )?(?:appropriated|provided)\b",
+    re.IGNORECASE,
+)
+FIGURE = re.compile(_MONEY)
+# What may come straight after the figure that closes a purpose clause.
+CLOSES = re.compile(
+    r"\s*(?:[,:;.)]|$)|\s+(?:to remain available|to be\b|of which|which shall|shall remain available"
+    r"|and shall remain|for the fiscal year|under the same terms)",
+    re.IGNORECASE,
+)
+# What, just before a figure, makes it a limit or a carve-out rather than the appropriation.
+LIMITED = re.compile(
+    r"(?:not to exceed|not more than|not less than|up to|including|of which|except|exceed|than|plus|less"
+    r"|amounts? available|made available|under this heading)\s*(?:an amount of\s*)?$",
+    re.IGNORECASE,
+)
+LOAN_LEVEL = re.compile(r"\b(?:principal amount of|gross obligations)\b", re.IGNORECASE)
+SENTENCE_START = re.compile(r"(?:(?<=[.:])\s+|\n)(?=For\b)")
+
+
+def _value(digits: str) -> int:
+    return int(digits.replace(",", ""))
+
+
+def _closing_figure(sentence: str) -> int | None:
+    """The first figure in a sentence that closes its purpose clause, or None."""
+    for m in FIGURE.finditer(sentence):
+        before = sentence[max(0, m.start() - 40) : m.start()]
+        if not re.search(r"[,:;)]\s*$", before):
+            continue  # an appropriation follows its purposes after punctuation
+        if LIMITED.search(before.rstrip(" ,:;")):
+            continue
+        if CLOSES.match(sentence, m.end()):
+            return _value(m.group(1))
+    return None
+
+
+def resolve(text: str) -> int | None:
+    if not text or cb.classify_text(text) != "appropriation":
+        return None
+    flat = " ".join(strip_amendment_annotations(text).split())
+    totals = IN_ALL.findall(flat)
+    if totals:
+        return _value(totals[-1])
+    operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
+    explicit = EXPLICIT.search(operative)
+    if explicit:
+        return _value(explicit.group(1) or explicit.group(2))
+    # Each "For ..." sentence is a candidate appropriation; loan-level sentences are not.
+    for sentence in (s for s in SENTENCE_START.split(operative) if s.strip()):
+        if LOAN_LEVEL.search(sentence.split("$", 1)[0]):
+            continue
+        figure = _closing_figure(sentence)
+        if figure is not None:
+            return figure
+    return None
