@@ -117,3 +117,59 @@ def resolve(text: str) -> int | None:
         if figure is not None:
             return figure
     return None
+
+
+# --- Itemised lines --------------------------------------------------------------------
+# A paragraph can itemise its appropriation: "..., $22,278,891, including: Office of the
+# Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...". Committee
+# reports often list each line as an account of its own, so typing one figure per paragraph
+# cannot match them. `ledger` types every line with its own text, using the same
+# closing-figure rule as the top line; `resolve_named` looks a report line up in it by name.
+INCLUDING_LIST = re.compile(r"\bincluding:\s*", re.IGNORECASE)
+# A line's text runs to the next "of which", so one line never inherits the next one's purpose.
+OF_WHICH_LINE = re.compile(
+    r"\bof which\s+(?:not (?:more|less) than\s+)?" + _MONEY + r"((?:(?!\bof which\b)[^;:])*)", re.IGNORECASE
+)
+_NAME_STOP = {"of", "the", "and", "for", "to", "in", "a", "an", "on", "at", "by", "or", "with", "incl", "including"}
+NAME_MATCH = 0.6
+
+
+def _tokens(text: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words if w not in _NAME_STOP}
+
+
+def _name_score(name: str, text: str) -> float:
+    """Share of the name's words the text carries. A report's parenthetical ("(part of allowances
+    and expenses)") annotates its line rather than naming it, so it is dropped."""
+    wanted = _tokens(re.sub(r"\([^)]*\)", " ", name))
+    return len(wanted & _tokens(text)) / len(wanted) if wanted else 0.0
+
+
+def ledger(text: str) -> list[tuple[str, int]]:
+    """(line text, figure) for each itemised line of an appropriating paragraph."""
+    if not text or cb.classify_text(text) != "appropriation":
+        return []
+    flat = " ".join(strip_amendment_annotations(text).split())
+    operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
+    lines = []
+    listing = INCLUDING_LIST.search(operative)
+    if listing:
+        for part in operative[listing.end() :].split(";"):
+            figure = _closing_figure(part)
+            if figure is not None:
+                lines.append((part, figure))
+    lines += [(m.group(2), _value(m.group(1))) for m in OF_WHICH_LINE.finditer(operative)]
+    return lines
+
+
+def resolve_named(text: str, name: str, heading: str) -> int | None:
+    """The figure for a named line: the top line when the name is the paragraph's heading, else
+    the one itemised line the name matches best (a tie abstains to the top line)."""
+    top = resolve(text)
+    if top is None or _name_score(name, heading) >= NAME_MATCH:
+        return top
+    scored = sorted(((_name_score(name, line), figure) for line, figure in ledger(text)), reverse=True)
+    if scored and scored[0][0] >= NAME_MATCH and (len(scored) == 1 or scored[1][0] < scored[0][0]):
+        return scored[0][1]
+    return top

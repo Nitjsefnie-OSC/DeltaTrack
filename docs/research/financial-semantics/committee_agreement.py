@@ -93,9 +93,18 @@ def baseline(text: str) -> int | None:
     return int(float(m.group(1).replace(",", ""))) if m else None
 
 
-RESOLVERS = {
+# One figure per paragraph, from its text alone: what the roll-up check sums.
+TEXT_RESOLVERS = {
     "baseline": baseline,
     "structured": appropriation_resolver.resolve,
+}
+# What the account check scores: each takes the paragraph and the answer-key account. Only
+# "ledger" reads the account, and only its name, to look the report line up among the lines
+# the paragraph itemises; the figure still comes from the drafting rules.
+RESOLVERS = {
+    "baseline": lambda text, acc: baseline(text),
+    "structured": lambda text, acc: appropriation_resolver.resolve(text),
+    "ledger": lambda text, acc: appropriation_resolver.resolve_named(text, acc["excel_name"], acc["match_path"][-1]),
 }
 
 
@@ -149,9 +158,16 @@ def measure(resolver, jurisdictions: set[str] | None = None) -> tuple[list[Resul
             if text is None:
                 unmapped[slug] += 1
                 continue
-            typed = resolver(text)
+            typed = resolver(text, acc)
             outcome = judge(acc["expected_amount"], typed, text)
-            if outcome != "agree" and len(amounts_per_node[(acc["bill"], acc["version"], path)]) > 1:
+            # A paragraph-level figure cannot match a finer report line; a line-level figure
+            # can, so it is scored like any other claim.
+            paragraph_level = typed is None or typed in (appropriation_resolver.resolve(text), baseline(text))
+            if (
+                outcome != "agree"
+                and paragraph_level
+                and len(amounts_per_node[(acc["bill"], acc["version"], path)]) > 1
+            ):
                 outcome = "finer_than_node"
             results.append(Result(slug, acc["bill"], path, acc["expected_amount"], typed, outcome, text))
     return results, unmapped

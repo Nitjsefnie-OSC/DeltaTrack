@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "docs" / "research" / "financial-semantics"))
 
 import committee_agreement  # noqa: E402
-from appropriation_resolver import resolve  # noqa: E402
+from appropriation_resolver import ledger, resolve, resolve_named  # noqa: E402
 
 
 def test_the_figure_closing_the_purpose_clause_beats_an_allowance_inside_it():
@@ -76,6 +76,40 @@ def test_it_abstains_rather_than_guess():
     assert resolve("None of the funds made available may be used for $5,000,000 of travel.") is None
 
 
+LEADERSHIP = (
+    "For salaries and expenses, as authorized by law, $22,278,891, including: Office of the Speaker, "
+    "$6,645,417, including $25,000 for official expenses of the Speaker; Office of the Majority Floor "
+    "Leader, $2,180,048, including $10,000 for official expenses of the Majority Leader; Office of the "
+    "Minority Floor Leader, $7,114,471, including $10,000 for official expenses of the Minority Leader."
+)
+
+
+def test_an_itemised_line_is_found_by_its_name_and_typed_by_its_closing_figure():
+    """Each line's own allowance ("including $25,000 ...") is a limit, not the line's figure."""
+    assert resolve_named(LEADERSHIP, "Office of the Speaker", "house leadership offices") == 6_645_417
+    assert resolve_named(LEADERSHIP, "Minority Floor Leader", "house leadership offices") == 7_114_471
+    assert [figure for _, figure in ledger(LEADERSHIP)] == [6_645_417, 2_180_048, 7_114_471]
+
+
+def test_the_heading_name_keeps_the_top_line():
+    assert resolve_named(LEADERSHIP, "House Leadership Offices", "house leadership offices") == 22_278_891
+
+
+def test_an_of_which_line_does_not_inherit_the_next_ones_purpose():
+    """Each "of which" line's text stops at the next, so only the second names the interns."""
+    text = (
+        "For Senators' Official Personnel and Office Expense Account, $449,000,000 of which $20,128,950 shall "
+        "remain available until September 30, 2022 and of which $6,000,000 shall be allocated solely for the "
+        "purpose of providing financial compensation to Senate interns."
+    )
+    heading = "senators' official personnel and office expense account"
+    assert resolve_named(text, "Intern compensation (part of the expense account)", heading) == 6_000_000
+
+
+def test_a_name_no_line_carries_falls_back_to_the_top_line():
+    assert resolve_named(LEADERSHIP, "Capitol Police Board", "house leadership offices") == 22_278_891
+
+
 # The two typing disagreements left where the report's figure is in the text. Neither is a
 # figure picked from the wrong place: each is a question the figure's type has to answer.
 KNOWN_WRONG_FIGURES = {
@@ -104,9 +138,22 @@ def test_no_wrong_figure_where_the_report_figure_is_in_the_text():
     figure for that account is in the text: an error a reader would add up. Fails on any new
     one, and on a listed one that no longer occurs, so the list cannot go stale.
     """
-    results, _ = committee_agreement.measure(resolve)
+    results, _ = committee_agreement.measure(committee_agreement.RESOLVERS["structured"])
     wrong = {(r.jurisdiction, r.path) for r in results if r.outcome == "wrong_figure"}
     assert wrong == KNOWN_WRONG_FIGURES, (
         f"new: {sorted(wrong - KNOWN_WRONG_FIGURES)}; no longer wrong: {sorted(KNOWN_WRONG_FIGURES - wrong)}"
     )
     assert sum(r.outcome == "agree" for r in results) >= 955, "fewer accounts agree with their report than measured"
+
+
+@pytest.mark.slow
+def test_the_ledger_types_no_wrong_figure_but_gross_versus_net():
+    """Looking report lines up among itemised lines must not trade agreements for wrong figures.
+
+    The one left is the gross-versus-net account the structured gate also lists; the itemised
+    House office it lists is found by name here.
+    """
+    results, _ = committee_agreement.measure(committee_agreement.RESOLVERS["ledger"])
+    wrong = {(r.jurisdiction, r.path) for r in results if r.outcome == "wrong_figure"}
+    assert wrong == {next(k for k in KNOWN_WRONG_FIGURES if k[0] == "homeland_security")}
+    assert sum(r.outcome == "agree" for r in results) >= 1051, "fewer accounts agree with their report than measured"

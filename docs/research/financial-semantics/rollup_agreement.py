@@ -46,7 +46,8 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[2])]
 
 import classify_bill as cb  # noqa: E402
-from committee_agreement import RESOLVERS, account_texts  # noqa: E402
+from committee_agreement import TEXT_RESOLVERS as RESOLVERS  # noqa: E402
+from committee_agreement import account_texts  # noqa: E402
 
 from deltatrack.parsers.committee_report import (  # noqa: E402
     ComparativeRow,

@@ -33,13 +33,13 @@ uv run python docs/research/financial-semantics/committee_agreement.py --resolve
 
 On the 1,163 mapped accounts (of 1,267), reproduced by the first command:
 
-| | `classify_bill` (first figure of the primary clause) | `appropriation_resolver` |
-|---|---|---|
-| Agrees with the report | 920 (79.1%) | 955 (82.1%) |
-| Typed a different figure while the report's is in the text | 37 | 2 |
-| Typed nothing while the report's figure is in the text | 21 | 21 |
-| Typed a figure the report does not state (no single figure in the text matches) | 46 | 46 |
-| Answer key finer than the bill node (several report lines, one paragraph) | 122 | 122 |
+| | `classify_bill` (first figure of the primary clause) | `structured` (one figure per paragraph) | `ledger` (plus itemised lines) |
+|---|---|---|---|
+| Agrees with the report | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) |
+| Typed a different figure while the report's is in the text | 37 | 2 | 1 |
+| Typed nothing while the report's figure is in the text | 21 | 21 | 21 |
+| Typed a figure the report does not state (no single figure in the text matches) | 46 | 46 | 46 |
+| Answer key finer than the figure typed (several report lines, one paragraph) | 122 | 122 | 27 |
 
 The resolver changes which figure is chosen, never which paragraphs count as appropriations, so it
 reads the paragraph as drafted: an "in all" total; nothing after the first proviso; an explicit
@@ -97,6 +97,27 @@ itemised lines, summing an account's appropriating figures) would raise the ceil
 1,066 (91.7%): 101 of the 122 are a figure printed in the paragraph, and 10 of the 63 are a sum
 of two to four figures before its first proviso. The rest are report-versus-bill differences
 that only hand-tracing settles.
+
+**Itemised lines (`ledger`).** Most of those 122 are Legislative Branch paragraphs that itemise
+their appropriation ("..., $22,278,891, including: Office of the Speaker, $6,645,417, ...;
+Office of the Majority Floor Leader, $2,180,048, ...") or carve out a named line ("and of which
+$6,000,000 shall be allocated solely for ... compensation to Senate interns"). `ledger` types each
+line with its own text and closing figure, by the same rule as the top line; `resolve_named` then
+looks a report line up in it by name, and only when the report's name is not the paragraph's
+heading. The answer key's name is used to find a line, never to choose a figure, so a wrong line
+or a wrong figure still scores as wrong (one does: the gross-versus-net account).
+
+Read the 90.4% with where it comes from. All 96 new agreements are Legislative Branch, whose 411
+accounts are over a third of the answer keys, and the rule was written while reading them (they
+are in `DEV`). DEV goes from 81.1% to 95.3%; HELD_OUT is unchanged at 83.5%, because those bills do
+not itemise this way. Outside Legislative Branch the remaining gap is not a typing question:
+
+- figures no single figure in the account confirms (41 held out), which need hand-tracing;
+- answer-key lines the builder mapped to the wrong paragraph (for example "Civil Rights
+  Violations in State and Local Prisons", $2.66 billion, mapped to the Commission on Civil
+  Rights' $14.85 million paragraph, with narrative text in its `bureau` field), which is a
+  `scripts/build_validation.py` question;
+- accounts that appropriate several figures (at most 10 more, by the sum bound above).
 
 ## Do typed figures add up to the report's agency totals?
 
