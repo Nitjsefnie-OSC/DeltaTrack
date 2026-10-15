@@ -44,11 +44,11 @@ On the 1,163 mapped accounts (of 1,267), reproduced by the first command:
 
 | | `classify_bill` (first figure of the primary clause) | `structured` (one figure per paragraph) | `ledger` (plus itemised lines) | `summed` (plus an account's added pieces) |
 |---|---|---|---|---|
-| Agrees with the report | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) | 1,061 (91.2%) |
-| Typed a different figure while the report's is in the text | 37 | 2 | 1 | 1 |
-| Typed nothing while the report's figure is in the text | 21 | 21 | 21 | 21 |
-| Typed a figure the report does not state (no single figure in the text matches) | 46 | 46 | 46 | 36 |
-| Answer key finer than the figure typed (several report lines, one paragraph) | 122 | 122 | 27 | 27 |
+| Agrees with the answer key | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) | 1,061 (91.2%) |
+| Typed a different figure while the answer key's is in the text | 37 | 2 | 1 | 1 |
+| Typed nothing while the answer key's figure is in the text | 21 | 21 | 21 | 21 |
+| Typed a figure the answer key does not state (no single figure in the text matches) | 46 | 46 | 46 | 36 |
+| Answer key finer than the figure typed (several answer-key lines, one paragraph) | 122 | 122 | 27 | 27 |
 
 The same agreement by evidence source (the summary's last lines):
 
@@ -111,8 +111,9 @@ uv run python tools/fetch_bills.py download 118 hr 4366
 The scripts use only stdlib and the project's core dependencies. The Jupyter notebooks use `pandas`, which is in the `dev` dependency group. Running `uv sync` installs everything — no extra steps needed.
 
 **What the 82% is made of.** It is not a quality score for the resolver. Of the 1,163 accounts,
-122 are report lines finer than the bill's paragraph (several offices of one "including: ..."
-paragraph) and 63 have no single figure in the account's text equal to the report's, so no
+122 are answer-key lines finer than the bill's paragraph (several offices of one "including: ..."
+paragraph, 101 of them from the spreadsheet) and 63 have no single figure in the account's text
+equal to the answer key's, so no
 method that types one figure per account, rules or a model, can agree on those 185. Where one
 figure can, the resolver agrees on 955 of 978 (97.6%). Typing **every** figure (naming the
 itemised lines, summing an account's appropriating figures) would raise the ceiling to at most
@@ -125,8 +126,8 @@ paragraphs that itemise their appropriation ("..., $22,278,891, including: Offic
 Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...") or carve out a
 named line ("and of which $6,000,000 shall be allocated solely for ... compensation to Senate
 interns"). `ledger` types each line with its own text and closing figure, by the same rule as the
-top line; `select_named` then looks a report line up in it by name, and only when the report's
-name is not the paragraph's heading. The answer key's name is used to find a line, never to
+top line; `select_named` then looks an answer-key line up in it by name, and only when the
+line's name is not the paragraph's heading. The answer key's name is used to find a line, never to
 choose a figure. A figure selected for a line is scored against that line's figure, whatever any
 other resolver types for the paragraph, so a wrong line or a wrong figure still scores as wrong
 (one does: the gross-versus-net account).

@@ -125,9 +125,9 @@ def resolve(text: str) -> int | None:
 
 # --- Itemised lines --------------------------------------------------------------------
 # A paragraph can itemise its appropriation: "..., $22,278,891, including: Office of the
-# Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...". Committee
-# reports often list each line as an account of its own, so typing one figure per paragraph
-# cannot match them. `ledger` types every line with its own text, using the same
+# Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...". Answer keys,
+# the Legislative Branch spreadsheet above all, often list each line as an account of its own,
+# so typing one figure per paragraph cannot match them. `ledger` types every line with its own text, using the same
 # closing-figure rule as the top line; `resolve_named` looks a report line up in it by name.
 INCLUDING_LIST = re.compile(r"\bincluding:\s*", re.IGNORECASE)
 # A line's text runs to the next "of which", so one line never inherits the next one's purpose.
