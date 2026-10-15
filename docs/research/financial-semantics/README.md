@@ -176,9 +176,11 @@ So 121 of the resolver's 154 complete roll-ups reproduce the report's agency tot
   type".
 - **Money `classify_bill` leaves untyped.** Ten of the 31 have a paragraph under the heading
   that carries money and is classified `unknown`, so the sum undercounts by construction.
-- **An obligation limitation typed as an appropriation.** Federal Transit Administration's sum is
-  $14.28 billion over the report's: it includes a Highway Trust Fund limitation on obligations,
-  which the report keeps out of budget authority. Only the roll-up catches this; no single
-  account's figure disagreed with a report line.
+- **A liquidating appropriation typed as new money.** Federal Transit Administration's sum is
+  $14.28 billion over the report's: "For payment of obligations incurred in the Federal public
+  transportation assistance program ..., $14,279,000,000, to be derived from the Mass Transit
+  Account" pays off obligations already made under contract authority, and the report keeps it out
+  of new budget authority. The resolver types it as the account's appropriation. Only the roll-up
+  catches this; no single account's figure disagreed with a report line.
 - **The report groups accounts the bill heads differently.** Agriculture's "Total, Executive
   Operations" sums thirteen offices; the bill's "Executive Operations" heading carries three.
