@@ -1,15 +1,17 @@
 """The appropriation resolver: which figure an appropriations paragraph appropriates.
 
 `docs/research/financial-semantics/appropriation_resolver.py` picks one figure per account,
-or abstains; `committee_agreement.py` beside it scores that figure against the committee
-reports. The unit tests pin each drafting rule on a constructed paragraph, so removing a rule
-turns its test red. The slow gate holds the claim the research makes for ADR 0025 (proposed,
-#796): where the report's figure is in the account's text, the resolver never types a
-different figure, except for the cases listed with their reason.
+or abstains; `committee_agreement.py` beside it scores that figure against the answer keys
+(committee reports, and the Legislative Branch spreadsheet). The unit tests pin each drafting
+rule on a constructed paragraph, so removing a rule turns its test red. The slow gate holds the
+claim the research makes for ADR 0025 (proposed, #796): where the answer key's figure is in the
+account's text, the resolver never types a different figure, except for the cases listed with
+their reason.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -136,18 +138,37 @@ def test_a_name_no_line_carries_falls_back_to_the_top_line():
 
 
 @pytest.mark.parametrize("others_type_the_line_figure", [False, True])
-def test_a_wrong_itemised_line_is_an_error_whatever_other_resolvers_type(monkeypatch, others_type_the_line_figure):
-    """A line selected by name is judged against that line's report figure, so a typing error
-    cannot turn into a granularity limit because another resolver happens to type the same figure."""
-    wrong_line = Selection(7_114_471, LINE)  # the Minority Leader's line, for the Speaker's report line
+def test_a_wrong_itemised_line_is_an_error_whatever_other_resolvers_type(
+    monkeypatch, tmp_path, others_type_the_line_figure
+):
+    """A line selected by name is judged against that line's answer-key figure, so a typing error
+    cannot turn into a granularity limit because another resolver happens to type the same figure.
+
+    Runs `measure()` on a synthetic answer key mapping three report lines to LEADERSHIP: the
+    Speaker's line is given the Minority Leader's figure (a wrong line), the other two the
+    paragraph's own figure (finer than the node, not an error).
+    """
+    path = ["house leadership offices"]
+    lines = {"Office of the Speaker": 6_645_417, "Majority Floor Leader": 2_180_048, "Minority Floor Leader": 7_114_471}
+    accounts = [
+        {"bill": "b", "version": "v", "match_path": path, "excel_name": name, "expected_amount": amount}
+        for name, amount in lines.items()
+    ]
+    (tmp_path / "validation_synthetic.json").write_text(json.dumps({"source": "CRPT-synthetic", "accounts": accounts}))
+    monkeypatch.setattr(committee_agreement, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(committee_agreement, "account_texts", lambda bill, version: {tuple(path): LEADERSHIP})
     if others_type_the_line_figure:
         for name in ("resolve", "resolve_total"):
             monkeypatch.setattr(committee_agreement.appropriation_resolver, name, lambda text: 7_114_471)
         monkeypatch.setattr(committee_agreement, "baseline", lambda text: 7_114_471)
-    assert committee_agreement.judge(6_645_417, wrong_line, LEADERSHIP, report_lines_at_node=3) == "wrong_figure"
-    # The paragraph's own figure against a finer report line is a limit of granularity, not an error.
-    top = Selection(22_278_891, PARAGRAPH)
-    assert committee_agreement.judge(6_645_417, top, LEADERSHIP, report_lines_at_node=3) == "finer_than_node"
+
+    def resolver(text, acc):
+        if acc["excel_name"] == "Office of the Speaker":
+            return Selection(7_114_471, LINE)
+        return Selection(22_278_891, PARAGRAPH)
+
+    results, _ = committee_agreement.measure(resolver)
+    assert [r.outcome for r in results] == ["wrong_figure", "finer_than_node", "finer_than_node"]
 
 
 def test_a_trust_fund_amount_together_with_the_top_line_is_part_of_the_account():
