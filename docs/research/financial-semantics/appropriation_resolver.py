@@ -44,6 +44,7 @@ estimate; a fresh answer key is (see README).
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 import classify_bill as cb
 
@@ -163,16 +164,32 @@ def ledger(text: str) -> list[tuple[str, int]]:
     return lines
 
 
-def resolve_named(text: str, name: str, heading: str) -> int | None:
+PARAGRAPH, LINE = "paragraph", "line"
+
+
+class Selection(NamedTuple):
+    """A typed figure and what it is the figure of: the paragraph's own (`PARAGRAPH`) or one
+    itemised line found by name (`LINE`). Scoring reads the scope from here, never from
+    whether the figure happens to equal another resolver's."""
+
+    figure: int | None
+    scope: str
+
+
+def select_named(text: str, name: str, heading: str) -> Selection:
     """The figure for a named line: the top line when the name is the paragraph's heading, else
     the one itemised line the name matches best (a tie abstains to the top line)."""
     top = resolve(text)
     if top is None or _name_score(name, heading) >= NAME_MATCH:
-        return top
+        return Selection(top, PARAGRAPH)
     scored = sorted(((_name_score(name, line), figure) for line, figure in ledger(text)), reverse=True)
     if scored and scored[0][0] >= NAME_MATCH and (len(scored) == 1 or scored[1][0] < scored[0][0]):
-        return scored[0][1]
-    return top
+        return Selection(scored[0][1], LINE)
+    return Selection(top, PARAGRAPH)
+
+
+def resolve_named(text: str, name: str, heading: str) -> int | None:
+    return select_named(text, name, heading).figure
 
 
 # --- Accounts that appropriate more than one figure -------------------------------------
@@ -217,7 +234,7 @@ def resolve_total(text: str) -> int | None:
     return total
 
 
-def resolve_named_total(text: str, name: str, heading: str) -> int | None:
-    """`resolve_named`, with the account's whole appropriation as the paragraph's own figure."""
-    figure = resolve_named(text, name, heading)
-    return resolve_total(text) if figure is not None and figure == resolve(text) else figure
+def select_named_total(text: str, name: str, heading: str) -> Selection:
+    """`select_named`, with the account's whole appropriation as the paragraph's own figure."""
+    selection = select_named(text, name, heading)
+    return selection if selection.scope == LINE else Selection(resolve_total(text), PARAGRAPH)

@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "docs" / "research" / "financial-semantics"))
 
 import committee_agreement  # noqa: E402
-from appropriation_resolver import ledger, resolve, resolve_named, resolve_total  # noqa: E402
+from appropriation_resolver import LINE, PARAGRAPH, Selection, ledger, resolve, resolve_named, resolve_total  # noqa: E402
 
 
 def test_the_figure_closing_the_purpose_clause_beats_an_allowance_inside_it():
@@ -108,6 +108,21 @@ def test_an_of_which_line_does_not_inherit_the_next_ones_purpose():
 
 def test_a_name_no_line_carries_falls_back_to_the_top_line():
     assert resolve_named(LEADERSHIP, "Capitol Police Board", "house leadership offices") == 22_278_891
+
+
+@pytest.mark.parametrize("others_type_the_line_figure", [False, True])
+def test_a_wrong_itemised_line_is_an_error_whatever_other_resolvers_type(monkeypatch, others_type_the_line_figure):
+    """A line selected by name is judged against that line's report figure, so a typing error
+    cannot turn into a granularity limit because another resolver happens to type the same figure."""
+    wrong_line = Selection(7_114_471, LINE)  # the Minority Leader's line, for the Speaker's report line
+    if others_type_the_line_figure:
+        for name in ("resolve", "resolve_total"):
+            monkeypatch.setattr(committee_agreement.appropriation_resolver, name, lambda text: 7_114_471)
+        monkeypatch.setattr(committee_agreement, "baseline", lambda text: 7_114_471)
+    assert committee_agreement.judge(6_645_417, wrong_line, LEADERSHIP, report_lines_at_node=3) == "wrong_figure"
+    # The paragraph's own figure against a finer report line is a limit of granularity, not an error.
+    top = Selection(22_278_891, PARAGRAPH)
+    assert committee_agreement.judge(6_645_417, top, LEADERSHIP, report_lines_at_node=3) == "finer_than_node"
 
 
 def test_a_trust_fund_amount_together_with_the_top_line_is_part_of_the_account():

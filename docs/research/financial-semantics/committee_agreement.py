@@ -20,7 +20,8 @@ outcome:
                       would add up that the report does not confirm) or abstained.
     finer_than_node   the answer key maps several report lines with different figures to this
                       one bill node (an itemised paragraph), so at most one can be the node's
-                      appropriation; reported, not scored
+                      appropriation; the paragraph's own figure against them is reported, not
+                      scored. A figure selected for one itemised line is scored as above.
 
 ADR 0025's zero tolerance applies to `wrong_figure` and to `report_not_in_text/typed`: both
 put a number in front of a reader that the official source contradicts or does not confirm.
@@ -48,6 +49,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[2])]
 
 import appropriation_resolver  # noqa: E402
 import classify_bill as cb  # noqa: E402
+from appropriation_resolver import PARAGRAPH, Selection  # noqa: E402
 
 from deltatrack.amounts import extract_amounts  # noqa: E402
 from deltatrack.bill_tree import normalize_bill  # noqa: E402
@@ -99,14 +101,15 @@ TEXT_RESOLVERS = {
     "structured": appropriation_resolver.resolve,
     "summed": appropriation_resolver.resolve_total,
 }
-# What the account check scores: each takes the paragraph and the answer-key account. Only
-# "ledger" reads the account, and only its name, to look the report line up among the lines
-# the paragraph itemises; the figure still comes from the drafting rules.
+# What the account check scores: each takes the paragraph and the answer-key account and returns
+# a `Selection`, the figure with its scope. Only "ledger" and "summed" read the account, and only
+# its name, to look the report line up among the lines the paragraph itemises; the figure still
+# comes from the drafting rules.
 RESOLVERS = {
-    "baseline": lambda text, acc: baseline(text),
-    "structured": lambda text, acc: appropriation_resolver.resolve(text),
-    "ledger": lambda text, acc: appropriation_resolver.resolve_named(text, acc["excel_name"], acc["match_path"][-1]),
-    "summed": lambda text, acc: appropriation_resolver.resolve_named_total(
+    "baseline": lambda text, acc: Selection(baseline(text), PARAGRAPH),
+    "structured": lambda text, acc: Selection(appropriation_resolver.resolve(text), PARAGRAPH),
+    "ledger": lambda text, acc: appropriation_resolver.select_named(text, acc["excel_name"], acc["match_path"][-1]),
+    "summed": lambda text, acc: appropriation_resolver.select_named_total(
         text, acc["excel_name"], acc["match_path"][-1]
     ),
 }
@@ -134,9 +137,15 @@ def account_texts(bill: str, version: str) -> dict[tuple[str, ...], str]:
     return {path: "\n".join(parts) for path, parts in texts.items()}
 
 
-def judge(expected: int, typed: int | None, text: str) -> str:
+def judge(expected: int, selection: Selection, text: str, report_lines_at_node: int = 1) -> str:
+    typed = selection.figure
     if typed == expected:
         return "agree"
+    # The paragraph's own figure cannot match a report line finer than the paragraph; an
+    # itemised line's figure can, so it is scored like any other claim, whatever any other
+    # resolver types for the paragraph.
+    if selection.scope == PARAGRAPH and report_lines_at_node > 1:
+        return "finer_than_node"
     if expected in extract_amounts(text):
         return "missed" if typed is None else "wrong_figure"
     return "report_not_in_text/abstained" if typed is None else "report_not_in_text/typed"
@@ -162,22 +171,10 @@ def measure(resolver, jurisdictions: set[str] | None = None) -> tuple[list[Resul
             if text is None:
                 unmapped[slug] += 1
                 continue
-            typed = resolver(text, acc)
-            outcome = judge(acc["expected_amount"], typed, text)
-            # A paragraph-level figure cannot match a finer report line; a line-level figure
-            # can, so it is scored like any other claim.
-            paragraph_level = typed is None or typed in (
-                appropriation_resolver.resolve(text),
-                appropriation_resolver.resolve_total(text),
-                baseline(text),
-            )
-            if (
-                outcome != "agree"
-                and paragraph_level
-                and len(amounts_per_node[(acc["bill"], acc["version"], path)]) > 1
-            ):
-                outcome = "finer_than_node"
-            results.append(Result(slug, acc["bill"], path, acc["expected_amount"], typed, outcome, text))
+            selection = resolver(text, acc)
+            lines = len(amounts_per_node[(acc["bill"], acc["version"], path)])
+            outcome = judge(acc["expected_amount"], selection, text, lines)
+            results.append(Result(slug, acc["bill"], path, acc["expected_amount"], selection.figure, outcome, text))
     return results, unmapped
 
 
