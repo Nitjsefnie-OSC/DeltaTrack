@@ -6,10 +6,11 @@ one the paragraph mentions on the way to its appropriation: an allowance inside 
 clause ("including up to $32,500,000 for payments to State agencies"), a loan level, or one
 line of an itemised total. This resolver reads the paragraph the way it is drafted instead:
 
-1. **An explicit total wins.** "...; in all, $3,476,000." and "In all: $37,023,244,000" state
+1. **The appropriation comes before the provisos.** Text after the first "Provided, That"
+   qualifies money already appropriated, so no figure there is the appropriation, an "in
+   all" there included: it caps one use of the money.
+2. **An explicit total wins.** "...; in all, $3,476,000." and "In all: $37,023,244,000" state
    the account's total after itemising it.
-2. **The appropriation comes before the provisos.** Text after the first "Provided, That"
-   qualifies money already appropriated, so no figure there is the appropriation.
 3. **An explicit appropriating verb.** "$24,000,000 is hereby appropriated", "there is
    appropriated $600,000,000": the general-provision form.
 4. **Otherwise the figure that closes the purpose clause.** An appropriation reads "For
@@ -103,10 +104,12 @@ def resolve(text: str) -> int | None:
     if not text or cb.classify_text(text) != "appropriation":
         return None
     flat = " ".join(strip_amendment_annotations(text).split())
-    totals = IN_ALL.findall(flat)
+    operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
+    # A proviso's "in all" caps a use of the money ("travel shall not exceed, in all, $500,000");
+    # only one before the first proviso totals the account.
+    totals = IN_ALL.findall(operative)
     if totals:
         return _value(totals[-1])
-    operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
     explicit = EXPLICIT.search(operative)
     if explicit:
         return _value(explicit.group(1) or explicit.group(2))
@@ -222,9 +225,9 @@ def resolve_total(text: str) -> int | None:
     if top is None:
         return None
     flat = " ".join(strip_amendment_annotations(text).split())
-    if IN_ALL.search(flat):
-        return top  # an "in all" figure is already the total
     operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
+    if IN_ALL.search(operative):
+        return top  # an "in all" figure is already the total
     total = top
     second = SECOND_PURPOSE.search(operative)
     if second and top in (_value(second.group(1)), _value(second.group(2))):

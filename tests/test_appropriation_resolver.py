@@ -35,7 +35,8 @@ def test_an_in_all_total_is_the_account():
     """Each itemised line closes like an appropriation; only the "in all" rule finds the total."""
     text = (
         "For expense allowances of the Secretary of the Senate, $7,110; Secretary for the Majority "
-        "of the Senate, $7,110; Secretary for the Minority of the Senate, $7,110; in all, $28,440."
+        "of the Senate, $7,110; Secretary for the Minority of the Senate, $7,110; in all, $28,440: "
+        "Provided, That no allowance shall be paid twice."
     )
     assert resolve(text) == 28_440
 
@@ -49,6 +50,19 @@ def test_no_figure_after_the_first_proviso_is_the_appropriation():
     )
     assert resolve(text) == 31_775_179_000
     assert resolve("For grants to States: Provided, That of the total, $5,000,000 shall remain available.") is None
+
+
+def test_an_in_all_cap_inside_a_proviso_is_not_the_accounts_total():
+    """Read as the total, the cap replaces the appropriation a reader would add up."""
+    capped = "For necessary expenses, $10,000,000: Provided, That payments for travel shall not exceed, in all, $500,000."
+    assert resolve(capped) == 10_000_000
+    assert resolve_total(capped) == 10_000_000
+    # The cap must not stop the account's own pieces being added either.
+    pieces = (
+        "For necessary expenses, $10,000,000, together with not to exceed $2,000,000 which may be expended from the "
+        "Trust Fund: Provided, That payments for travel shall not exceed, in all, $500,000."
+    )
+    assert resolve_total(pieces) == 12_000_000
 
 
 def test_a_loan_level_is_skipped_for_the_cost_appropriation():
