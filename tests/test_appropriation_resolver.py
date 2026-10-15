@@ -11,6 +11,7 @@ different figure, except for the cases listed with their reason.
 from __future__ import annotations
 
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "docs" / "research" / "financial-semantics"))
 
 import committee_agreement  # noqa: E402
-from appropriation_resolver import LINE, PARAGRAPH, Selection, ledger, resolve, resolve_named, resolve_total  # noqa: E402
+from appropriation_resolver import (  # noqa: E402
+    LINE,
+    PARAGRAPH,
+    Selection,
+    ledger,
+    resolve,
+    resolve_named,
+    resolve_total,
+)
 
 
 def test_the_figure_closing_the_purpose_clause_beats_an_allowance_inside_it():
@@ -54,7 +63,9 @@ def test_no_figure_after_the_first_proviso_is_the_appropriation():
 
 def test_an_in_all_cap_inside_a_proviso_is_not_the_accounts_total():
     """Read as the total, the cap replaces the appropriation a reader would add up."""
-    capped = "For necessary expenses, $10,000,000: Provided, That payments for travel shall not exceed, in all, $500,000."
+    capped = (
+        "For necessary expenses, $10,000,000: Provided, That payments for travel shall not exceed, in all, $500,000."
+    )
     assert resolve(capped) == 10_000_000
     assert resolve_total(capped) == 10_000_000
     # The cap must not stop the account's own pieces being added either.
@@ -180,6 +191,8 @@ def test_an_advance_appropriation_available_this_year_is_added_and_an_in_all_tot
     assert resolve_total(in_all) == 14_220
 
 
+SPREADSHEET = "House_and_Senate_Appropriations_FY_1994_to_present.xlsx"  # validation_leg_branch.json's source
+
 # The two typing disagreements left where the report's figure is in the text. Neither is a
 # figure picked from the wrong place: each is a question the figure's type has to answer.
 KNOWN_WRONG_FIGURES = {
@@ -194,15 +207,15 @@ KNOWN_WRONG_FIGURES = {
             "operations and support",
         ),
     ),  # noqa: E501
-    # The report lists one office of an itemised paragraph ("...Office of the Whistleblower
-    # Ombudsman, $750,000; ...") as an account; the paragraph appropriates its total.
+    # The Legislative Branch spreadsheet lists one office of an itemised paragraph ("...Office of
+    # the Whistleblower Ombudsman, $750,000; ...") as an account; the paragraph appropriates its total.
     ("leg_branch", ("legislative branch", "house of representatives", "salaries, officers and employees")),
 }
 
 
 @pytest.mark.slow
 def test_no_wrong_figure_where_the_report_figure_is_in_the_text():
-    """ADR 0025's zero tolerance, on the committed committee-report answer keys.
+    """ADR 0025's zero tolerance, on the committed answer keys.
 
     A `wrong_figure` is a figure typed as the account's appropriation while the report's own
     figure for that account is in the text: an error a reader would add up. Fails on any new
@@ -224,7 +237,11 @@ def test_summing_an_accounts_pieces_types_no_wrong_figure_but_gross_versus_net()
     results, _ = committee_agreement.measure(committee_agreement.RESOLVERS["summed"])
     wrong = {(r.jurisdiction, r.path) for r in results if r.outcome == "wrong_figure"}
     assert wrong == {next(k for k in KNOWN_WRONG_FIGURES if k[0] == "homeland_security")}
-    assert sum(r.outcome == "agree" for r in results) >= 1061, "fewer accounts agree with their report than measured"
+    # Held per evidence source, as the README reports them: the spreadsheet's itemised lines
+    # must not be counted as committee-report agreement.
+    agree = Counter(r.source for r in results if r.outcome == "agree")
+    assert agree[committee_agreement.COMMITTEE_REPORTS] >= 658, "fewer accounts agree with their committee report"
+    assert agree[SPREADSHEET] >= 403, "fewer accounts agree with the Legislative Branch spreadsheet"
 
 
 @pytest.mark.slow

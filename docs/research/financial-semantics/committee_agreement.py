@@ -4,8 +4,10 @@ ADR 0025 (proposed, #796) sets the bar for dollar amounts returning to the repor
 figure typed as an account's appropriation must **equal** the committee report's figure for
 that account. ADR 0009's recall check (`tests/validation_check.py`) asks something weaker,
 whether the report's figure appears anywhere under the agency. This measures the strong
-claim, for every account in the committee-report answer keys (`tests/data/validation_*.json`)
-whose bill node the builder could map.
+claim, for every account in the answer keys (`tests/data/validation_*.json`) whose bill node
+the builder could map. Most keys are built from committee reports; `leg_branch` is not: it
+comes from the House and Senate appropriations spreadsheet (its `source`), so the summary
+reports each source separately. "The report's figure" below means the answer key's.
 
 Each resolver reads one account's text and returns the single figure it types as that
 account's appropriation, or None when it will not say. Every mapped account lands in one
@@ -115,9 +117,19 @@ RESOLVERS = {
 }
 
 
+COMMITTEE_REPORTS = "committee reports"
+
+
+def evidence_source(key_source: str) -> str:
+    """Which source an answer key's figures come from: a committee report (cited by its CRPT id)
+    or, otherwise, the file the key names."""
+    return COMMITTEE_REPORTS if key_source.startswith("CRPT-") else key_source
+
+
 @dataclass(frozen=True)
 class Result:
     jurisdiction: str
+    source: str
     bill: str
     path: tuple[str, ...]
     expected: int
@@ -157,7 +169,8 @@ def measure(resolver, jurisdictions: set[str] | None = None) -> tuple[list[Resul
         slug = fixture.stem.removeprefix("validation_")
         if jurisdictions is not None and slug not in jurisdictions:
             continue
-        accounts = json.loads(fixture.read_text())["accounts"]
+        key = json.loads(fixture.read_text())
+        source, accounts = evidence_source(key["source"]), key["accounts"]
         # The answer key sometimes maps several report lines to one bill node, e.g. each
         # office of "For salaries and expenses, $22,278,891, including: Office of the
         # Speaker, $6,645,417; ...". At most one of those can be the node's appropriation.
@@ -174,7 +187,9 @@ def measure(resolver, jurisdictions: set[str] | None = None) -> tuple[list[Resul
             selection = resolver(text, acc)
             lines = len(amounts_per_node[(acc["bill"], acc["version"], path)])
             outcome = judge(acc["expected_amount"], selection, text, lines)
-            results.append(Result(slug, acc["bill"], path, acc["expected_amount"], selection.figure, outcome, text))
+            results.append(
+                Result(slug, source, acc["bill"], path, acc["expected_amount"], selection.figure, outcome, text)
+            )
     return results, unmapped
 
 
@@ -211,6 +226,17 @@ def summary(results: list[Result], unmapped: Counter) -> str:
         f"wrong figure {total['wrong_figure']}, missed {total['missed']}"
     )
     lines.append(f"figures typed that the report contradicts or does not confirm (ADR 0025 errors): {errors}")
+    by_source: dict[str, Counter] = defaultdict(Counter)
+    for r in results:
+        by_source[r.source][r.outcome] += 1
+    lines.append("\nby evidence source:")
+    for source, c in sorted(by_source.items(), key=lambda item: item[0] != COMMITTEE_REPORTS):
+        n = sum(c.values())
+        lines.append(
+            f"  {source}: agree {c['agree']}/{n} ({100 * c['agree'] / n:.1f}%), "
+            f"ADR 0025 errors {c['wrong_figure'] + c['report_not_in_text/typed']}, "
+            f"finer than node {c['finer_than_node']}"
+        )
     return "\n".join(lines)
 
 
