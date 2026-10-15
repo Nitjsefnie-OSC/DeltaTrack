@@ -173,3 +173,51 @@ def resolve_named(text: str, name: str, heading: str) -> int | None:
     if scored and scored[0][0] >= NAME_MATCH and (len(scored) == 1 or scored[1][0] < scored[0][0]):
         return scored[0][1]
     return top
+
+
+# --- Accounts that appropriate more than one figure -------------------------------------
+# A committee report's account figure is everything the account gets, and some paragraphs
+# give it in pieces: a trust-fund amount "together with" the top line, an amount "in
+# addition", a second purpose ("$345,000,000 and, for carrying out ... section 437, $72,515,000"),
+# or an advance appropriation from last year's act that becomes available this year.
+# `resolve_total` adds those pieces, each by its own phrase, to the top line.
+TOGETHER_WITH = re.compile(
+    r"\btogether with\s+(?:not to exceed\s+)?"
+    + _MONEY
+    + r",?\s+which\s+(?:may|shall)\s+be\s+(?:expended|available)\s+from\b",
+    re.IGNORECASE,
+)
+# Only "in addition" that continues the account's own sentence (", and in addition $X") joins it;
+# a new sentence "In addition, $235,000, to be derived from the Oil Spill Liability Trust Fund to
+# reimburse ..." is a separate appropriation the report does not count in the account.
+IN_ADDITION = re.compile(r"[,;]\s+and,?\s+in addition,?\s+(?:not to exceed\s+)?" + _MONEY, re.IGNORECASE)
+PREVIOUSLY = re.compile(
+    r"\(in addition to the\s+" + _MONEY + r"\s+previously appropriated under this heading", re.IGNORECASE
+)
+SECOND_PURPOSE = re.compile(
+    _MONEY + r",?\s+and,?\s+for\b[^$]{0,300}?,\s+" + _MONEY + r"(?=\s*(?:[,:;.]|$)|\s+to remain)", re.IGNORECASE
+)
+
+
+def resolve_total(text: str) -> int | None:
+    """The account's whole appropriation: its top line plus the pieces it adds by phrase."""
+    top = resolve(text)
+    if top is None:
+        return None
+    flat = " ".join(strip_amendment_annotations(text).split())
+    if IN_ALL.search(flat):
+        return top  # an "in all" figure is already the total
+    operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
+    total = top
+    second = SECOND_PURPOSE.search(operative)
+    if second and top in (_value(second.group(1)), _value(second.group(2))):
+        total = _value(second.group(1)) + _value(second.group(2))
+    for pattern in (TOGETHER_WITH, IN_ADDITION, PREVIOUSLY):
+        total += sum(_value(m.group(1)) for m in pattern.finditer(operative))
+    return total
+
+
+def resolve_named_total(text: str, name: str, heading: str) -> int | None:
+    """`resolve_named`, with the account's whole appropriation as the paragraph's own figure."""
+    figure = resolve_named(text, name, heading)
+    return resolve_total(text) if figure is not None and figure == resolve(text) else figure

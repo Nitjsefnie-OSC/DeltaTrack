@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "docs" / "research" / "financial-semantics"))
 
 import committee_agreement  # noqa: E402
-from appropriation_resolver import ledger, resolve, resolve_named  # noqa: E402
+from appropriation_resolver import ledger, resolve, resolve_named, resolve_total  # noqa: E402
 
 
 def test_the_figure_closing_the_purpose_clause_beats_an_allowance_inside_it():
@@ -110,6 +110,47 @@ def test_a_name_no_line_carries_falls_back_to_the_top_line():
     assert resolve_named(LEADERSHIP, "Capitol Police Board", "house leadership offices") == 22_278_891
 
 
+def test_a_trust_fund_amount_together_with_the_top_line_is_part_of_the_account():
+    text = (
+        "For necessary expenses of the Bureau of Labor Statistics, $634,952,000, together with not to exceed "
+        "$68,000,000 which may be expended from the Employment Security Administration account."
+    )
+    assert resolve(text) == 634_952_000
+    assert resolve_total(text) == 702_952_000
+
+
+def test_in_addition_joins_the_account_only_within_its_own_sentence():
+    """A same-sentence ", and in addition $X" continues the account; a new "In addition" sentence does not."""
+    same = (
+        "For necessary expenses, $48,925,000, to remain available, and in addition not to exceed "
+        "$3,075,000, for appeals."
+    )
+    separate = (
+        "For necessary expenses, $395,020,000, to remain available. In addition, $235,000, to be derived from the "
+        "Oil Spill Liability Trust Fund to reimburse administrative expenses."
+    )
+    assert resolve_total(same) == 52_000_000
+    assert resolve_total(separate) == 395_020_000
+
+
+def test_a_second_purpose_in_the_same_paragraph_is_added():
+    text = (
+        "For carrying out section 436 of the Social Security Act, $345,000,000 and, for carrying out section 437 of "
+        "such Act, $72,515,000: Provided, That none of the funds may be used for travel."
+    )
+    assert resolve_total(text) == 417_515_000
+
+
+def test_an_advance_appropriation_available_this_year_is_added_and_an_in_all_total_is_not_doubled():
+    advance = (
+        "For activities under the Act, $16,254,000,000, to remain available until expended, shall be available on "
+        "October 1, 2024 (in addition to the $400,000,000 previously appropriated under this heading)."
+    )
+    assert resolve_total(advance) == 16_654_000_000
+    in_all = "For allowances, $7,110; Secretary for the Majority, $7,110; in all, $14,220."
+    assert resolve_total(in_all) == 14_220
+
+
 # The two typing disagreements left where the report's figure is in the text. Neither is a
 # figure picked from the wrong place: each is a question the figure's type has to answer.
 KNOWN_WRONG_FIGURES = {
@@ -144,6 +185,17 @@ def test_no_wrong_figure_where_the_report_figure_is_in_the_text():
         f"new: {sorted(wrong - KNOWN_WRONG_FIGURES)}; no longer wrong: {sorted(KNOWN_WRONG_FIGURES - wrong)}"
     )
     assert sum(r.outcome == "agree" for r in results) >= 955, "fewer accounts agree with their report than measured"
+
+
+@pytest.mark.slow
+def test_summing_an_accounts_pieces_types_no_wrong_figure_but_gross_versus_net():
+    """Adding "together with", "in addition", second-purpose and advance figures must not cost
+    an account that agreed on its top line alone (the Fiscal Service's separate "In addition,
+    $235,000" sentence did, until in-addition was confined to the account's own sentence)."""
+    results, _ = committee_agreement.measure(committee_agreement.RESOLVERS["summed"])
+    wrong = {(r.jurisdiction, r.path) for r in results if r.outcome == "wrong_figure"}
+    assert wrong == {next(k for k in KNOWN_WRONG_FIGURES if k[0] == "homeland_security")}
+    assert sum(r.outcome == "agree" for r in results) >= 1061, "fewer accounts agree with their report than measured"
 
 
 @pytest.mark.slow

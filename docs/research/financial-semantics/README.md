@@ -33,13 +33,13 @@ uv run python docs/research/financial-semantics/committee_agreement.py --resolve
 
 On the 1,163 mapped accounts (of 1,267), reproduced by the first command:
 
-| | `classify_bill` (first figure of the primary clause) | `structured` (one figure per paragraph) | `ledger` (plus itemised lines) |
-|---|---|---|---|
-| Agrees with the report | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) |
-| Typed a different figure while the report's is in the text | 37 | 2 | 1 |
-| Typed nothing while the report's figure is in the text | 21 | 21 | 21 |
-| Typed a figure the report does not state (no single figure in the text matches) | 46 | 46 | 46 |
-| Answer key finer than the figure typed (several report lines, one paragraph) | 122 | 122 | 27 |
+| | `classify_bill` (first figure of the primary clause) | `structured` (one figure per paragraph) | `ledger` (plus itemised lines) | `summed` (plus an account's added pieces) |
+|---|---|---|---|---|
+| Agrees with the report | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) | 1,061 (91.2%) |
+| Typed a different figure while the report's is in the text | 37 | 2 | 1 | 1 |
+| Typed nothing while the report's figure is in the text | 21 | 21 | 21 | 21 |
+| Typed a figure the report does not state (no single figure in the text matches) | 46 | 46 | 46 | 36 |
+| Answer key finer than the figure typed (several report lines, one paragraph) | 122 | 122 | 27 | 27 |
 
 The resolver changes which figure is chosen, never which paragraphs count as appropriations, so it
 reads the paragraph as drafted: an "in all" total; nothing after the first proviso; an explicit
@@ -117,7 +117,21 @@ not itemise this way. Outside Legislative Branch the remaining gap is not a typi
   Violations in State and Local Prisons", $2.66 billion, mapped to the Commission on Civil
   Rights' $14.85 million paragraph, with narrative text in its `bureau` field), which is a
   `scripts/build_validation.py` question;
-- accounts that appropriate several figures (at most 10 more, by the sum bound above).
+- accounts that appropriate several figures: the ten the sum bound above found are now typed (below).
+
+**Accounts that appropriate in pieces (`summed`).** Ten accounts' report figure was a sum of figures
+in their paragraph, each added by its own phrase: a trust-fund amount "together with" the top line
+("$634,952,000, together with not to exceed $68,000,000 which may be expended from the Employment
+Security Administration account"), five times; ", and in addition not to exceed $3,075,000"; a
+second purpose ("$345,000,000 and, for carrying out ... section 437 ..., $72,515,000"), twice; and
+an advance appropriation from last year's act that becomes available this year ("(in addition to the
+$4,000,000,000 previously appropriated under this heading"), twice. `resolve_total` adds those
+pieces to the top line; all ten now agree. One account that had agreed on its top line was lost on
+the first attempt: the Fiscal Service's separate sentence "In addition, $235,000, to be derived from
+the Oil Spill Liability Trust Fund to reimburse ..." is not counted by its report, so "in addition"
+now joins an account only within its own sentence. That distinction rests on one example each way,
+and these rules were written after the held-out keys had been read: HELD_OUT moves from 83.5% to
+85.5%, which is not an unbiased estimate.
 
 ## Do typed figures add up to the report's agency totals?
 
@@ -148,7 +162,8 @@ command:
 | Complete, and none of these | 41 | 31 |
 | Incomplete (an appropriating account abstained, or none was typed) | 31 | 36 |
 
-So 121 of the resolver's 154 complete roll-ups reproduce the report's agency total.
+So 121 of the resolver's 154 complete roll-ups reproduce the report's agency total. With
+`resolve_total` (an account's added pieces summed in), 124 do (116 net, 8 gross), 30 do not.
 `tests/test_rollup_agreement.py` pins the attribution and these counts.
 
 **Why the other 31 do not, hand-traced:**

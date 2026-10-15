@@ -97,6 +97,7 @@ def baseline(text: str) -> int | None:
 TEXT_RESOLVERS = {
     "baseline": baseline,
     "structured": appropriation_resolver.resolve,
+    "summed": appropriation_resolver.resolve_total,
 }
 # What the account check scores: each takes the paragraph and the answer-key account. Only
 # "ledger" reads the account, and only its name, to look the report line up among the lines
@@ -105,6 +106,9 @@ RESOLVERS = {
     "baseline": lambda text, acc: baseline(text),
     "structured": lambda text, acc: appropriation_resolver.resolve(text),
     "ledger": lambda text, acc: appropriation_resolver.resolve_named(text, acc["excel_name"], acc["match_path"][-1]),
+    "summed": lambda text, acc: appropriation_resolver.resolve_named_total(
+        text, acc["excel_name"], acc["match_path"][-1]
+    ),
 }
 
 
@@ -162,7 +166,11 @@ def measure(resolver, jurisdictions: set[str] | None = None) -> tuple[list[Resul
             outcome = judge(acc["expected_amount"], typed, text)
             # A paragraph-level figure cannot match a finer report line; a line-level figure
             # can, so it is scored like any other claim.
-            paragraph_level = typed is None or typed in (appropriation_resolver.resolve(text), baseline(text))
+            paragraph_level = typed is None or typed in (
+                appropriation_resolver.resolve(text),
+                appropriation_resolver.resolve_total(text),
+                baseline(text),
+            )
             if (
                 outcome != "agree"
                 and paragraph_level

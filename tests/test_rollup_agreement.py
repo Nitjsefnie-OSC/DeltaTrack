@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "docs" / "research" / "financial-semantics"))
 
 import rollup_agreement as ra  # noqa: E402
-from appropriation_resolver import resolve  # noqa: E402
+from appropriation_resolver import resolve, resolve_total  # noqa: E402
 
 from deltatrack.parsers.committee_report import ComparativeRow  # noqa: E402
 
@@ -83,6 +83,15 @@ def test_rollup_outcomes_match_the_measurement_the_readme_quotes():
         "gross": 8,
         "with_additional": 2,
         "mismatch": 31,
+        "incomplete": 36,
+        "unmapped": 83,
+        "report_inconsistent": 133,
+    }
+    summed = Counter(r.outcome for r in ra.measure(resolve_total))
+    assert summed == {
+        "net": 116,
+        "gross": 8,
+        "mismatch": 30,
         "incomplete": 36,
         "unmapped": 83,
         "report_inconsistent": 133,
