@@ -63,7 +63,8 @@ entirely the spreadsheet's itemised lines, and every figure `summed` types that 
 contradicts or does not confirm (37) is on a committee-report account.
 
 The resolver changes which figure is chosen, never which paragraphs count as appropriations, so it
-reads the paragraph as drafted: an "in all" total; nothing after the first proviso; an explicit
+reads the paragraph as drafted: nothing after the first proviso (an "in all" there caps one use
+of the money); an "in all" total before it; an explicit
 "is hereby appropriated"; otherwise the figure that closes the purpose clause, skipping allowances
 inside it and loan levels; and abstaining when none fits. `tests/test_appropriation_resolver.py`
 pins each rule and fails on any wrong figure beyond the two listed there (gross versus net for a
@@ -119,14 +120,16 @@ itemised lines, summing an account's appropriating figures) would raise the ceil
 of two to four figures before its first proviso. The rest are report-versus-bill differences
 that only hand-tracing settles.
 
-**Itemised lines (`ledger`).** Most of those 122 are spreadsheet lines for Legislative Branch paragraphs that itemise
-their appropriation ("..., $22,278,891, including: Office of the Speaker, $6,645,417, ...;
-Office of the Majority Floor Leader, $2,180,048, ...") or carve out a named line ("and of which
-$6,000,000 shall be allocated solely for ... compensation to Senate interns"). `ledger` types each
-line with its own text and closing figure, by the same rule as the top line; `resolve_named` then
-looks a report line up in it by name, and only when the report's name is not the paragraph's
-heading. The answer key's name is used to find a line, never to choose a figure, so a wrong line
-or a wrong figure still scores as wrong (one does: the gross-versus-net account).
+**Itemised lines (`ledger`).** Most of those 122 are spreadsheet lines for Legislative Branch
+paragraphs that itemise their appropriation ("..., $22,278,891, including: Office of the
+Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...") or carve out a
+named line ("and of which $6,000,000 shall be allocated solely for ... compensation to Senate
+interns"). `ledger` types each line with its own text and closing figure, by the same rule as the
+top line; `select_named` then looks a report line up in it by name, and only when the report's
+name is not the paragraph's heading. The answer key's name is used to find a line, never to
+choose a figure. A figure selected for a line is scored against that line's figure, whatever any
+other resolver types for the paragraph, so a wrong line or a wrong figure still scores as wrong
+(one does: the gross-versus-net account).
 
 Read the 90.4% with where it comes from. All 96 new agreements are in the Legislative Branch
 spreadsheet key (`leg_branch`), whose 411 accounts are over a third of the answer keys, and the
