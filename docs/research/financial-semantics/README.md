@@ -15,6 +15,7 @@ Financial classifier and analysis tools for DeltaTrack bill data.
 | `classifier_notes.md` | Design rationale: pattern decisions and intentionally-unknown categories |
 | `committee_agreement.py` | Scores the figure typed as each account's appropriation against the committee report's figure for that account (ADR 0025, proposed, #796) |
 | `appropriation_resolver.py` | Picks the one figure an appropriations paragraph appropriates, the way the paragraph is drafted, or abstains |
+| `rollup_agreement.py` | Adds the typed figures up per agency and checks them against the committee report's "Total, <agency>" lines |
 
 ## Does the typed appropriation equal the committee report's?
 
@@ -86,3 +87,62 @@ uv run python tools/fetch_bills.py download 118 hr 4366
 ## Dependencies
 
 The scripts use only stdlib and the project's core dependencies. The Jupyter notebooks use `pandas`, which is in the `dev` dependency group. Running `uv sync` installs everything — no extra steps needed.
+
+**What the 82% is made of.** It is not a quality score for the resolver. Of the 1,163 accounts,
+122 are report lines finer than the bill's paragraph (several offices of one "including: ..."
+paragraph) and 63 have no single figure in the account's text equal to the report's, so no
+method that types one figure per account, rules or a model, can agree on those 185. Where one
+figure can, the resolver agrees on 955 of 978 (97.6%). Typing **every** figure (naming the
+itemised lines, summing an account's appropriating figures) would raise the ceiling to at most
+1,066 (91.7%): 101 of the 122 are a figure printed in the paragraph, and 10 of the 63 are a sum
+of two to four figures before its first proviso. The rest are report-versus-bill differences
+that only hand-tracing settles.
+
+## Do typed figures add up to the report's agency totals?
+
+The account figures exist to be rolled up: account, agency, department. `rollup_agreement.py`
+checks the roll-up against each "Total, <agency>" line of the thirteen Senate reports'
+comparative statements (in thousands):
+
+```bash
+uv run python docs/research/financial-semantics/rollup_agreement.py
+uv run python docs/research/financial-semantics/rollup_agreement.py --resolver structured --details mismatch
+```
+
+A report total is attributed to the rows above it by the report's own arithmetic: walking back,
+a subtotal contributes its value and is jumped over, and the span is the first run that adds up
+to the total. A total no run reproduces is not scored (`report_inconsistent`; the parser's
+section context is not reliable enough to attribute it otherwise). The total's name must then
+be exactly one bill heading. A report total is net of fee offsets and rescissions, which are
+negative rows; a typed figure is gross, so both are compared.
+
+Of the 406 totals, 273 are attributed; 190 of those name a bill heading. Reproduced by the first
+command:
+
+| | `classify_bill` | `appropriation_resolver` |
+|---|---|---|
+| Equals the report's net total | 109 | 113 |
+| Equals it with the report's negative rows added back (gross) | 7 | 8 |
+| Equals it once accounts' second figures ("together with $X from the ... Trust Fund") are added | 2 | 2 |
+| Complete, and none of these | 41 | 31 |
+| Incomplete (an appropriating account abstained, or none was typed) | 31 | 36 |
+
+So 121 of the resolver's 154 complete roll-ups reproduce the report's agency total.
+`tests/test_rollup_agreement.py` pins the attribution and these counts.
+
+**Why the other 31 do not, hand-traced:**
+
+- **Accounts that appropriate more than one figure.** "...section 436 of the Social Security
+  Act, $345,000,000 and, for carrying out ... section 437, $72,515,000" is one account whose
+  report total ($417,515,000) is both; "$537,144,000, together with $64,828,000 from the amounts
+  available under section 241" is another. A resolver that types one figure per account cannot
+  reproduce these, which is the roll-up's evidence for ADR 0025's "every figure gets its own
+  type".
+- **Money `classify_bill` leaves untyped.** Ten of the 31 have a paragraph under the heading
+  that carries money and is classified `unknown`, so the sum undercounts by construction.
+- **An obligation limitation typed as an appropriation.** Federal Transit Administration's sum is
+  $14.28 billion over the report's: it includes a Highway Trust Fund limitation on obligations,
+  which the report keeps out of budget authority. Only the roll-up catches this; no single
+  account's figure disagreed with a report line.
+- **The report groups accounts the bill heads differently.** Agriculture's "Total, Executive
+  Operations" sums thirteen offices; the bill's "Executive Operations" heading carries three.
