@@ -4,8 +4,10 @@ ADR 0025 (proposed, #796) sets the bar for dollar amounts returning to the repor
 figure typed as an account's appropriation must **equal** the committee report's figure for
 that account. ADR 0009's recall check (`tests/validation_check.py`) asks something weaker,
 whether the report's figure appears anywhere under the agency. This measures the strong
-claim, for every account in the committee-report answer keys (`tests/data/validation_*.json`)
-whose bill node the builder could map.
+claim, for every account in the answer keys (`tests/data/validation_*.json`) whose bill node
+the builder could map. Most keys are built from committee reports; `leg_branch` is not: it
+comes from the House and Senate appropriations spreadsheet (its `source`), so the summary
+reports each source separately. "The report's figure" below means the answer key's.
 
 Each resolver reads one account's text and returns the single figure it types as that
 account's appropriation, or None when it will not say. Every mapped account lands in one
@@ -20,7 +22,8 @@ outcome:
                       would add up that the report does not confirm) or abstained.
     finer_than_node   the answer key maps several report lines with different figures to this
                       one bill node (an itemised paragraph), so at most one can be the node's
-                      appropriation; reported, not scored
+                      appropriation; the paragraph's own figure against them is reported, not
+                      scored. A figure selected for one itemised line is scored as above.
 
 ADR 0025's zero tolerance applies to `wrong_figure` and to `report_not_in_text/typed`: both
 put a number in front of a reader that the official source contradicts or does not confirm.
@@ -48,6 +51,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[2])]
 
 import appropriation_resolver  # noqa: E402
 import classify_bill as cb  # noqa: E402
+from appropriation_resolver import PARAGRAPH, Selection  # noqa: E402
 
 from deltatrack.amounts import extract_amounts  # noqa: E402
 from deltatrack.bill_tree import normalize_bill  # noqa: E402
@@ -99,22 +103,33 @@ TEXT_RESOLVERS = {
     "structured": appropriation_resolver.resolve,
     "summed": appropriation_resolver.resolve_total,
 }
-# What the account check scores: each takes the paragraph and the answer-key account. Only
-# "ledger" reads the account, and only its name, to look the report line up among the lines
-# the paragraph itemises; the figure still comes from the drafting rules.
+# What the account check scores: each takes the paragraph and the answer-key account and returns
+# a `Selection`, the figure with its scope. Only "ledger" and "summed" read the account, and only
+# its name, to look the report line up among the lines the paragraph itemises; the figure still
+# comes from the drafting rules.
 RESOLVERS = {
-    "baseline": lambda text, acc: baseline(text),
-    "structured": lambda text, acc: appropriation_resolver.resolve(text),
-    "ledger": lambda text, acc: appropriation_resolver.resolve_named(text, acc["excel_name"], acc["match_path"][-1]),
-    "summed": lambda text, acc: appropriation_resolver.resolve_named_total(
+    "baseline": lambda text, acc: Selection(baseline(text), PARAGRAPH),
+    "structured": lambda text, acc: Selection(appropriation_resolver.resolve(text), PARAGRAPH),
+    "ledger": lambda text, acc: appropriation_resolver.select_named(text, acc["excel_name"], acc["match_path"][-1]),
+    "summed": lambda text, acc: appropriation_resolver.select_named_total(
         text, acc["excel_name"], acc["match_path"][-1]
     ),
 }
 
 
+COMMITTEE_REPORTS = "committee reports"
+
+
+def evidence_source(key_source: str) -> str:
+    """Which source an answer key's figures come from: a committee report (cited by its CRPT id)
+    or, otherwise, the file the key names."""
+    return COMMITTEE_REPORTS if key_source.startswith("CRPT-") else key_source
+
+
 @dataclass(frozen=True)
 class Result:
     jurisdiction: str
+    source: str
     bill: str
     path: tuple[str, ...]
     expected: int
@@ -134,9 +149,15 @@ def account_texts(bill: str, version: str) -> dict[tuple[str, ...], str]:
     return {path: "\n".join(parts) for path, parts in texts.items()}
 
 
-def judge(expected: int, typed: int | None, text: str) -> str:
+def judge(expected: int, selection: Selection, text: str, report_lines_at_node: int = 1) -> str:
+    typed = selection.figure
     if typed == expected:
         return "agree"
+    # The paragraph's own figure cannot match a report line finer than the paragraph; an
+    # itemised line's figure can, so it is scored like any other claim, whatever any other
+    # resolver types for the paragraph.
+    if selection.scope == PARAGRAPH and report_lines_at_node > 1:
+        return "finer_than_node"
     if expected in extract_amounts(text):
         return "missed" if typed is None else "wrong_figure"
     return "report_not_in_text/abstained" if typed is None else "report_not_in_text/typed"
@@ -148,7 +169,8 @@ def measure(resolver, jurisdictions: set[str] | None = None) -> tuple[list[Resul
         slug = fixture.stem.removeprefix("validation_")
         if jurisdictions is not None and slug not in jurisdictions:
             continue
-        accounts = json.loads(fixture.read_text())["accounts"]
+        key = json.loads(fixture.read_text())
+        source, accounts = evidence_source(key["source"]), key["accounts"]
         # The answer key sometimes maps several report lines to one bill node, e.g. each
         # office of "For salaries and expenses, $22,278,891, including: Office of the
         # Speaker, $6,645,417; ...". At most one of those can be the node's appropriation.
@@ -162,22 +184,12 @@ def measure(resolver, jurisdictions: set[str] | None = None) -> tuple[list[Resul
             if text is None:
                 unmapped[slug] += 1
                 continue
-            typed = resolver(text, acc)
-            outcome = judge(acc["expected_amount"], typed, text)
-            # A paragraph-level figure cannot match a finer report line; a line-level figure
-            # can, so it is scored like any other claim.
-            paragraph_level = typed is None or typed in (
-                appropriation_resolver.resolve(text),
-                appropriation_resolver.resolve_total(text),
-                baseline(text),
+            selection = resolver(text, acc)
+            lines = len(amounts_per_node[(acc["bill"], acc["version"], path)])
+            outcome = judge(acc["expected_amount"], selection, text, lines)
+            results.append(
+                Result(slug, source, acc["bill"], path, acc["expected_amount"], selection.figure, outcome, text)
             )
-            if (
-                outcome != "agree"
-                and paragraph_level
-                and len(amounts_per_node[(acc["bill"], acc["version"], path)]) > 1
-            ):
-                outcome = "finer_than_node"
-            results.append(Result(slug, acc["bill"], path, acc["expected_amount"], typed, outcome, text))
     return results, unmapped
 
 
@@ -214,6 +226,17 @@ def summary(results: list[Result], unmapped: Counter) -> str:
         f"wrong figure {total['wrong_figure']}, missed {total['missed']}"
     )
     lines.append(f"figures typed that the report contradicts or does not confirm (ADR 0025 errors): {errors}")
+    by_source: dict[str, Counter] = defaultdict(Counter)
+    for r in results:
+        by_source[r.source][r.outcome] += 1
+    lines.append("\nby evidence source:")
+    for source, c in sorted(by_source.items(), key=lambda item: item[0] != COMMITTEE_REPORTS):
+        n = sum(c.values())
+        lines.append(
+            f"  {source}: agree {c['agree']}/{n} ({100 * c['agree'] / n:.1f}%), "
+            f"ADR 0025 errors {c['wrong_figure'] + c['report_not_in_text/typed']}, "
+            f"finer than node {c['finer_than_node']}"
+        )
     return "\n".join(lines)
 
 

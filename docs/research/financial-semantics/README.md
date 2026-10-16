@@ -13,7 +13,7 @@ Financial classifier and analysis tools for DeltaTrack bill data.
 | `stress_test_analysis.py` | Script: parses all 7 reference bills, reports unknowns and FP risks |
 | `stress_test_detail.py` | Script: shows full text of unknown nodes per bill type |
 | `classifier_notes.md` | Design rationale: pattern decisions and intentionally-unknown categories |
-| `committee_agreement.py` | Scores the figure typed as each account's appropriation against the committee report's figure for that account (ADR 0025, proposed, #796) |
+| `committee_agreement.py` | Scores the figure typed as each account's appropriation against the answer key's figure for that account (committee reports, and one Legislative Branch spreadsheet), reported per source (ADR 0025, proposed, #796) |
 | `appropriation_resolver.py` | Picks the one figure an appropriations paragraph appropriates, the way the paragraph is drafted, or abstains |
 | `rollup_agreement.py` | Adds the typed figures up per agency and checks them against the committee report's "Total, <agency>" lines |
 
@@ -22,8 +22,17 @@ Financial classifier and analysis tools for DeltaTrack bill data.
 ADR 0009's recall check asks whether a committee report's figure for an account appears anywhere
 under its agency. ADR 0025 (proposed, #796) asks more: that the figure we **type** as the account's
 appropriation **equals** the report's. `committee_agreement.py` measures that over every account
-the committee-report answer keys (`tests/data/validation_*.json`) map to a bill node. Committed
-fixtures only, so it needs no download:
+the answer keys (`tests/data/validation_*.json`) map to a bill node. The keys come from two kinds
+of source, and the script reports them separately:
+
+- **Committee reports**: thirteen keys, each built from a Senate committee report's account
+  figures (`source: CRPT-...`), FY2024-FY2025 reported bills; 752 mapped accounts.
+- **The Legislative Branch spreadsheet**: `validation_leg_branch.json` comes from
+  `House_and_Senate_Appropriations_FY_1994_to_present.xlsx`, not a committee report, checked
+  against the FY2014-FY2020 enrolled bills; 411 mapped accounts. (`validation_legislative_branch.json`
+  is a separate key, from the FY2025 Senate report.)
+
+Committed fixtures only, so it needs no download:
 
 ```bash
 uv run python docs/research/financial-semantics/committee_agreement.py                 # both resolvers, all keys
@@ -35,14 +44,27 @@ On the 1,163 mapped accounts (of 1,267), reproduced by the first command:
 
 | | `classify_bill` (first figure of the primary clause) | `structured` (one figure per paragraph) | `ledger` (plus itemised lines) | `summed` (plus an account's added pieces) |
 |---|---|---|---|---|
-| Agrees with the report | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) | 1,061 (91.2%) |
-| Typed a different figure while the report's is in the text | 37 | 2 | 1 | 1 |
-| Typed nothing while the report's figure is in the text | 21 | 21 | 21 | 21 |
-| Typed a figure the report does not state (no single figure in the text matches) | 46 | 46 | 46 | 36 |
-| Answer key finer than the figure typed (several report lines, one paragraph) | 122 | 122 | 27 | 27 |
+| Agrees with the answer key | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) | 1,061 (91.2%) |
+| Typed a different figure while the answer key's is in the text | 37 | 2 | 1 | 1 |
+| Typed nothing while the answer key's figure is in the text | 21 | 21 | 21 | 21 |
+| Typed a figure the answer key does not state (no single figure in the text matches) | 46 | 46 | 46 | 36 |
+| Answer key finer than the figure typed (several answer-key lines, one paragraph) | 122 | 122 | 27 | 27 |
+
+The same agreement by evidence source (the summary's last lines):
+
+| Agrees with the answer key | `classify_bill` | `structured` | `ledger` | `summed` |
+|---|---|---|---|---|
+| Committee reports (752 accounts) | 636 (84.6%) | 648 (86.2%) | 648 (86.2%) | 658 (87.5%) |
+| Legislative Branch spreadsheet (411 accounts) | 284 (69.1%) | 307 (74.7%) | 403 (98.1%) | 403 (98.1%) |
+| Combined (1,163 accounts) | 920 (79.1%) | 955 (82.1%) | 1,051 (90.4%) | 1,061 (91.2%) |
+
+Against committee reports alone, `summed` agrees on 87.5%. The step from 82.1% to 90.4% is
+entirely the spreadsheet's itemised lines, and every figure `summed` types that its source
+contradicts or does not confirm (37) is on a committee-report account.
 
 The resolver changes which figure is chosen, never which paragraphs count as appropriations, so it
-reads the paragraph as drafted: an "in all" total; nothing after the first proviso; an explicit
+reads the paragraph as drafted: nothing after the first proviso (an "in all" there caps one use
+of the money); an "in all" total before it; an explicit
 "is hereby appropriated"; otherwise the figure that closes the purpose clause, skipping allowances
 inside it and loan levels; and abstaining when none fits. `tests/test_appropriation_resolver.py`
 pins each rule and fails on any wrong figure beyond the two listed there (gross versus net for a
@@ -89,8 +111,9 @@ uv run python tools/fetch_bills.py download 118 hr 4366
 The scripts use only stdlib and the project's core dependencies. The Jupyter notebooks use `pandas`, which is in the `dev` dependency group. Running `uv sync` installs everything — no extra steps needed.
 
 **What the 82% is made of.** It is not a quality score for the resolver. Of the 1,163 accounts,
-122 are report lines finer than the bill's paragraph (several offices of one "including: ..."
-paragraph) and 63 have no single figure in the account's text equal to the report's, so no
+122 are answer-key lines finer than the bill's paragraph (several offices of one "including: ..."
+paragraph, 101 of them from the spreadsheet) and 63 have no single figure in the account's text
+equal to the answer key's, so no
 method that types one figure per account, rules or a model, can agree on those 185. Where one
 figure can, the resolver agrees on 955 of 978 (97.6%). Typing **every** figure (naming the
 itemised lines, summing an account's appropriating figures) would raise the ceiling to at most
@@ -98,19 +121,23 @@ itemised lines, summing an account's appropriating figures) would raise the ceil
 of two to four figures before its first proviso. The rest are report-versus-bill differences
 that only hand-tracing settles.
 
-**Itemised lines (`ledger`).** Most of those 122 are Legislative Branch paragraphs that itemise
-their appropriation ("..., $22,278,891, including: Office of the Speaker, $6,645,417, ...;
-Office of the Majority Floor Leader, $2,180,048, ...") or carve out a named line ("and of which
-$6,000,000 shall be allocated solely for ... compensation to Senate interns"). `ledger` types each
-line with its own text and closing figure, by the same rule as the top line; `resolve_named` then
-looks a report line up in it by name, and only when the report's name is not the paragraph's
-heading. The answer key's name is used to find a line, never to choose a figure, so a wrong line
-or a wrong figure still scores as wrong (one does: the gross-versus-net account).
+**Itemised lines (`ledger`).** Most of those 122 are spreadsheet lines for Legislative Branch
+paragraphs that itemise their appropriation ("..., $22,278,891, including: Office of the
+Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...") or carve out a
+named line ("and of which $6,000,000 shall be allocated solely for ... compensation to Senate
+interns"). `ledger` types each line with its own text and closing figure, by the same rule as the
+top line; `select_named` then looks an answer-key line up in it by name, and only when the
+line's name is not the paragraph's heading. The answer key's name is used to find a line, never to
+choose a figure. A figure selected for a line is scored against that line's figure, whatever any
+other resolver types for the paragraph, so a wrong line or a wrong figure still scores as wrong
+(one does: the gross-versus-net account).
 
-Read the 90.4% with where it comes from. All 96 new agreements are Legislative Branch, whose 411
-accounts are over a third of the answer keys, and the rule was written while reading them (they
-are in `DEV`). DEV goes from 81.1% to 95.3%; HELD_OUT is unchanged at 83.5%, because those bills do
-not itemise this way. Outside Legislative Branch the remaining gap is not a typing question:
+Read the 90.4% with where it comes from. All 96 new agreements are in the Legislative Branch
+spreadsheet key (`leg_branch`), whose 411 accounts are over a third of the answer keys, and the
+rule was written while reading them (they are in `DEV`). They are agreement with the spreadsheet,
+not with a committee report: committee-report agreement is unchanged at 648 of 752. DEV goes from
+81.1% to 95.3%; HELD_OUT is unchanged at 83.5%, because those bills do not itemise this way.
+Outside the spreadsheet key the remaining gap is not a typing question:
 
 - figures no single figure in the account confirms (41 held out), which need hand-tracing;
 - answer-key lines the builder mapped to the wrong paragraph (for example "Civil Rights

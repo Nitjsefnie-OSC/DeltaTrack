@@ -6,10 +6,11 @@ one the paragraph mentions on the way to its appropriation: an allowance inside 
 clause ("including up to $32,500,000 for payments to State agencies"), a loan level, or one
 line of an itemised total. This resolver reads the paragraph the way it is drafted instead:
 
-1. **An explicit total wins.** "...; in all, $3,476,000." and "In all: $37,023,244,000" state
+1. **The appropriation comes before the provisos.** Text after the first "Provided, That"
+   qualifies money already appropriated, so no figure there is the appropriation, an "in
+   all" there included: it caps one use of the money.
+2. **An explicit total wins.** "...; in all, $3,476,000." and "In all: $37,023,244,000" state
    the account's total after itemising it.
-2. **The appropriation comes before the provisos.** Text after the first "Provided, That"
-   qualifies money already appropriated, so no figure there is the appropriation.
 3. **An explicit appropriating verb.** "$24,000,000 is hereby appropriated", "there is
    appropriated $600,000,000": the general-provision form.
 4. **Otherwise the figure that closes the purpose clause.** An appropriation reads "For
@@ -44,6 +45,7 @@ estimate; a fresh answer key is (see README).
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 import classify_bill as cb
 
@@ -102,10 +104,12 @@ def resolve(text: str) -> int | None:
     if not text or cb.classify_text(text) != "appropriation":
         return None
     flat = " ".join(strip_amendment_annotations(text).split())
-    totals = IN_ALL.findall(flat)
+    operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
+    # A proviso's "in all" caps a use of the money ("travel shall not exceed, in all, $500,000");
+    # only one before the first proviso totals the account.
+    totals = IN_ALL.findall(operative)
     if totals:
         return _value(totals[-1])
-    operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
     explicit = EXPLICIT.search(operative)
     if explicit:
         return _value(explicit.group(1) or explicit.group(2))
@@ -121,9 +125,9 @@ def resolve(text: str) -> int | None:
 
 # --- Itemised lines --------------------------------------------------------------------
 # A paragraph can itemise its appropriation: "..., $22,278,891, including: Office of the
-# Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...". Committee
-# reports often list each line as an account of its own, so typing one figure per paragraph
-# cannot match them. `ledger` types every line with its own text, using the same
+# Speaker, $6,645,417, ...; Office of the Majority Floor Leader, $2,180,048, ...". Answer keys,
+# the Legislative Branch spreadsheet above all, often list each line as an account of its own,
+# so typing one figure per paragraph cannot match them. `ledger` types every line with its own text, using the same
 # closing-figure rule as the top line; `resolve_named` looks a report line up in it by name.
 INCLUDING_LIST = re.compile(r"\bincluding:\s*", re.IGNORECASE)
 # A line's text runs to the next "of which", so one line never inherits the next one's purpose.
@@ -163,16 +167,32 @@ def ledger(text: str) -> list[tuple[str, int]]:
     return lines
 
 
-def resolve_named(text: str, name: str, heading: str) -> int | None:
+PARAGRAPH, LINE = "paragraph", "line"
+
+
+class Selection(NamedTuple):
+    """A typed figure and what it is the figure of: the paragraph's own (`PARAGRAPH`) or one
+    itemised line found by name (`LINE`). Scoring reads the scope from here, never from
+    whether the figure happens to equal another resolver's."""
+
+    figure: int | None
+    scope: str
+
+
+def select_named(text: str, name: str, heading: str) -> Selection:
     """The figure for a named line: the top line when the name is the paragraph's heading, else
     the one itemised line the name matches best (a tie abstains to the top line)."""
     top = resolve(text)
     if top is None or _name_score(name, heading) >= NAME_MATCH:
-        return top
+        return Selection(top, PARAGRAPH)
     scored = sorted(((_name_score(name, line), figure) for line, figure in ledger(text)), reverse=True)
     if scored and scored[0][0] >= NAME_MATCH and (len(scored) == 1 or scored[1][0] < scored[0][0]):
-        return scored[0][1]
-    return top
+        return Selection(scored[0][1], LINE)
+    return Selection(top, PARAGRAPH)
+
+
+def resolve_named(text: str, name: str, heading: str) -> int | None:
+    return select_named(text, name, heading).figure
 
 
 # --- Accounts that appropriate more than one figure -------------------------------------
@@ -205,9 +225,9 @@ def resolve_total(text: str) -> int | None:
     if top is None:
         return None
     flat = " ".join(strip_amendment_annotations(text).split())
-    if IN_ALL.search(flat):
-        return top  # an "in all" figure is already the total
     operative = cb.PROVIDED_RE.split(flat, maxsplit=1)[0]
+    if IN_ALL.search(operative):
+        return top  # an "in all" figure is already the total
     total = top
     second = SECOND_PURPOSE.search(operative)
     if second and top in (_value(second.group(1)), _value(second.group(2))):
@@ -217,7 +237,7 @@ def resolve_total(text: str) -> int | None:
     return total
 
 
-def resolve_named_total(text: str, name: str, heading: str) -> int | None:
-    """`resolve_named`, with the account's whole appropriation as the paragraph's own figure."""
-    figure = resolve_named(text, name, heading)
-    return resolve_total(text) if figure is not None and figure == resolve(text) else figure
+def select_named_total(text: str, name: str, heading: str) -> Selection:
+    """`select_named`, with the account's whole appropriation as the paragraph's own figure."""
+    selection = select_named(text, name, heading)
+    return selection if selection.scope == LINE else Selection(resolve_total(text), PARAGRAPH)

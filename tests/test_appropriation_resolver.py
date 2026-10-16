@@ -1,16 +1,19 @@
 """The appropriation resolver: which figure an appropriations paragraph appropriates.
 
 `docs/research/financial-semantics/appropriation_resolver.py` picks one figure per account,
-or abstains; `committee_agreement.py` beside it scores that figure against the committee
-reports. The unit tests pin each drafting rule on a constructed paragraph, so removing a rule
-turns its test red. The slow gate holds the claim the research makes for ADR 0025 (proposed,
-#796): where the report's figure is in the account's text, the resolver never types a
-different figure, except for the cases listed with their reason.
+or abstains; `committee_agreement.py` beside it scores that figure against the answer keys
+(committee reports, and the Legislative Branch spreadsheet). The unit tests pin each drafting
+rule on a constructed paragraph, so removing a rule turns its test red. The slow gate holds the
+claim the research makes for ADR 0025 (proposed, #796): where the answer key's figure is in the
+account's text, the resolver never types a different figure, except for the cases listed with
+their reason.
 """
 
 from __future__ import annotations
 
+import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -18,7 +21,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "docs" / "research" / "financial-semantics"))
 
 import committee_agreement  # noqa: E402
-from appropriation_resolver import ledger, resolve, resolve_named, resolve_total  # noqa: E402
+from appropriation_resolver import (  # noqa: E402
+    LINE,
+    PARAGRAPH,
+    Selection,
+    ledger,
+    resolve,
+    resolve_named,
+    resolve_total,
+)
 
 
 def test_the_figure_closing_the_purpose_clause_beats_an_allowance_inside_it():
@@ -35,7 +46,8 @@ def test_an_in_all_total_is_the_account():
     """Each itemised line closes like an appropriation; only the "in all" rule finds the total."""
     text = (
         "For expense allowances of the Secretary of the Senate, $7,110; Secretary for the Majority "
-        "of the Senate, $7,110; Secretary for the Minority of the Senate, $7,110; in all, $28,440."
+        "of the Senate, $7,110; Secretary for the Minority of the Senate, $7,110; in all, $28,440: "
+        "Provided, That no allowance shall be paid twice."
     )
     assert resolve(text) == 28_440
 
@@ -49,6 +61,21 @@ def test_no_figure_after_the_first_proviso_is_the_appropriation():
     )
     assert resolve(text) == 31_775_179_000
     assert resolve("For grants to States: Provided, That of the total, $5,000,000 shall remain available.") is None
+
+
+def test_an_in_all_cap_inside_a_proviso_is_not_the_accounts_total():
+    """Read as the total, the cap replaces the appropriation a reader would add up."""
+    capped = (
+        "For necessary expenses, $10,000,000: Provided, That payments for travel shall not exceed, in all, $500,000."
+    )
+    assert resolve(capped) == 10_000_000
+    assert resolve_total(capped) == 10_000_000
+    # The cap must not stop the account's own pieces being added either.
+    pieces = (
+        "For necessary expenses, $10,000,000, together with not to exceed $2,000,000 which may be expended from the "
+        "Trust Fund: Provided, That payments for travel shall not exceed, in all, $500,000."
+    )
+    assert resolve_total(pieces) == 12_000_000
 
 
 def test_a_loan_level_is_skipped_for_the_cost_appropriation():
@@ -110,6 +137,40 @@ def test_a_name_no_line_carries_falls_back_to_the_top_line():
     assert resolve_named(LEADERSHIP, "Capitol Police Board", "house leadership offices") == 22_278_891
 
 
+@pytest.mark.parametrize("others_type_the_line_figure", [False, True])
+def test_a_wrong_itemised_line_is_an_error_whatever_other_resolvers_type(
+    monkeypatch, tmp_path, others_type_the_line_figure
+):
+    """A line selected by name is judged against that line's answer-key figure, so a typing error
+    cannot turn into a granularity limit because another resolver happens to type the same figure.
+
+    Runs `measure()` on a synthetic answer key mapping three report lines to LEADERSHIP: the
+    Speaker's line is given the Minority Leader's figure (a wrong line), the other two the
+    paragraph's own figure (finer than the node, not an error).
+    """
+    path = ["house leadership offices"]
+    lines = {"Office of the Speaker": 6_645_417, "Majority Floor Leader": 2_180_048, "Minority Floor Leader": 7_114_471}
+    accounts = [
+        {"bill": "b", "version": "v", "match_path": path, "excel_name": name, "expected_amount": amount}
+        for name, amount in lines.items()
+    ]
+    (tmp_path / "validation_synthetic.json").write_text(json.dumps({"source": "CRPT-synthetic", "accounts": accounts}))
+    monkeypatch.setattr(committee_agreement, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(committee_agreement, "account_texts", lambda bill, version: {tuple(path): LEADERSHIP})
+    if others_type_the_line_figure:
+        for name in ("resolve", "resolve_total"):
+            monkeypatch.setattr(committee_agreement.appropriation_resolver, name, lambda text: 7_114_471)
+        monkeypatch.setattr(committee_agreement, "baseline", lambda text: 7_114_471)
+
+    def resolver(text, acc):
+        if acc["excel_name"] == "Office of the Speaker":
+            return Selection(7_114_471, LINE)
+        return Selection(22_278_891, PARAGRAPH)
+
+    results, _ = committee_agreement.measure(resolver)
+    assert [r.outcome for r in results] == ["wrong_figure", "finer_than_node", "finer_than_node"]
+
+
 def test_a_trust_fund_amount_together_with_the_top_line_is_part_of_the_account():
     text = (
         "For necessary expenses of the Bureau of Labor Statistics, $634,952,000, together with not to exceed "
@@ -151,6 +212,8 @@ def test_an_advance_appropriation_available_this_year_is_added_and_an_in_all_tot
     assert resolve_total(in_all) == 14_220
 
 
+SPREADSHEET = "House_and_Senate_Appropriations_FY_1994_to_present.xlsx"  # validation_leg_branch.json's source
+
 # The two typing disagreements left where the report's figure is in the text. Neither is a
 # figure picked from the wrong place: each is a question the figure's type has to answer.
 KNOWN_WRONG_FIGURES = {
@@ -165,15 +228,15 @@ KNOWN_WRONG_FIGURES = {
             "operations and support",
         ),
     ),  # noqa: E501
-    # The report lists one office of an itemised paragraph ("...Office of the Whistleblower
-    # Ombudsman, $750,000; ...") as an account; the paragraph appropriates its total.
+    # The Legislative Branch spreadsheet lists one office of an itemised paragraph ("...Office of
+    # the Whistleblower Ombudsman, $750,000; ...") as an account; the paragraph appropriates its total.
     ("leg_branch", ("legislative branch", "house of representatives", "salaries, officers and employees")),
 }
 
 
 @pytest.mark.slow
 def test_no_wrong_figure_where_the_report_figure_is_in_the_text():
-    """ADR 0025's zero tolerance, on the committed committee-report answer keys.
+    """ADR 0025's zero tolerance, on the committed answer keys.
 
     A `wrong_figure` is a figure typed as the account's appropriation while the report's own
     figure for that account is in the text: an error a reader would add up. Fails on any new
@@ -195,7 +258,11 @@ def test_summing_an_accounts_pieces_types_no_wrong_figure_but_gross_versus_net()
     results, _ = committee_agreement.measure(committee_agreement.RESOLVERS["summed"])
     wrong = {(r.jurisdiction, r.path) for r in results if r.outcome == "wrong_figure"}
     assert wrong == {next(k for k in KNOWN_WRONG_FIGURES if k[0] == "homeland_security")}
-    assert sum(r.outcome == "agree" for r in results) >= 1061, "fewer accounts agree with their report than measured"
+    # Held per evidence source, as the README reports them: the spreadsheet's itemised lines
+    # must not be counted as committee-report agreement.
+    agree = Counter(r.source for r in results if r.outcome == "agree")
+    assert agree[committee_agreement.COMMITTEE_REPORTS] >= 658, "fewer accounts agree with their committee report"
+    assert agree[SPREADSHEET] >= 403, "fewer accounts agree with the Legislative Branch spreadsheet"
 
 
 @pytest.mark.slow
