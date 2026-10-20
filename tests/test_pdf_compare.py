@@ -544,6 +544,86 @@ def test_numbered_pdfs_still_diff_after_guard():
     assert canonical["changes"]
 
 
+# ---------- Image-only PDF decline guard (#550) ----------------------------
+
+
+def _make_image_only_pdf(path: Path, *, first_page: int, page_count: int) -> None:
+    """Rasterize corpus pages into a PDF with images and no selectable text."""
+    pdfium = pytest.importorskip("pypdfium2")
+    pytest.importorskip("PIL.Image")
+
+    images = []
+    source = pdfium.PdfDocument(BILL_DIR / "1_reported-in-house.pdf")
+    try:
+        for index in range(first_page, first_page + page_count):
+            page = source[index]
+            bitmap = page.render(scale=1)
+            try:
+                images.append(bitmap.to_pil().convert("RGB"))
+            finally:
+                bitmap.close()
+                page.close()
+        images[0].save(path, format="PDF", save_all=True, append_images=images[1:])
+    finally:
+        source.close()
+        for image in images:
+            image.close()
+
+
+@pytest.fixture(scope="module", params=[1, 20, 50], ids=lambda count: f"{count}-pages")
+def image_only_pdfs(request, tmp_path_factory) -> tuple[Path, Path]:
+    """Two different page ranges, rendered without their source text layers."""
+    directory = tmp_path_factory.mktemp("image-only-pdfs")
+    start, end = directory / "start.pdf", directory / "end.pdf"
+    _make_image_only_pdf(start, first_page=2, page_count=request.param)
+    _make_image_only_pdf(end, first_page=22, page_count=request.param)
+    return start, end
+
+
+@pytest.mark.slow
+def test_image_only_pdfs_are_declined(image_only_pdfs):
+    from deltatrack.compare.pdf import UnsupportedLayoutError, compare_pdfs
+
+    start, end = image_only_pdfs
+    with pytest.raises(UnsupportedLayoutError, match="images rather than extractable text"):
+        compare_pdfs(start.read_bytes(), end.read_bytes())
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("scan_side", ["start", "end"])
+def test_image_only_pdf_is_declined_on_either_side(image_only_pdfs, scan_side):
+    from deltatrack.compare.pdf import UnsupportedLayoutError, compare_pdfs
+
+    scan = image_only_pdfs[0].read_bytes()
+    text = fixture_path("113-hr-3547", "2_engrossed-in-house.pdf").read_bytes()
+    start, end = (scan, text) if scan_side == "start" else (text, scan)
+    with pytest.raises(UnsupportedLayoutError, match="images rather than extractable text"):
+        compare_pdfs(start, end)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("scan_side", ["both", "start", "end"])
+def test_image_only_upload_returns_scan_message_verbatim(image_only_pdfs, scan_side):
+    start, end = (path.read_bytes() for path in image_only_pdfs)
+    text = fixture_path("113-hr-3547", "2_engrossed-in-house.pdf").read_bytes()
+    if scan_side == "start":
+        end = text
+    elif scan_side == "end":
+        start = text
+
+    resp = _client().post(
+        "/api/compare",
+        files={
+            "start_file": ("start.pdf", start, "application/pdf"),
+            "end_file": ("end.pdf", end, "application/pdf"),
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "This PDF appears to contain images rather than extractable text and cannot currently be compared."
+    )
+
+
 # ---------- Slow end-to-end engine test ------------------------------------
 
 
