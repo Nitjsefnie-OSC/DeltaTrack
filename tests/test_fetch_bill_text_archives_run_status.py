@@ -238,8 +238,13 @@ def test_download_stage_404_records_no_failure(tmp_path, capsys):
 
 
 @respx.mock
-def test_download_stage_exception_records_failure_and_continues(tmp_path, capsys):
-    payload = _mock_downloads(httpx.ConnectError("connection refused"))
+@pytest.mark.parametrize(
+    "failure",
+    [httpx.ConnectError("connection refused"), httpx.Response(500)],
+    ids=["connection-error", "http-500"],
+)
+def test_download_stage_exception_records_failure_and_continues(tmp_path, capsys, failure):
+    payload = _mock_downloads(failure)
 
     result = text_archives.download_archives([119], ["hr"], tmp_path)
 
