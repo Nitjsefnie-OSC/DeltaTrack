@@ -191,6 +191,19 @@ def test_download_exception_fails_after_processing_saved_archive(tmp_path, downl
     _assert_failure_summary(result, download_failed=len(tasks) - 1)
 
 
+def test_multiple_failure_categories_and_counts_preserve_healthy_bill(tmp_path):
+    zip_dir = tmp_path / "zips"
+    _archive(zip_dir / "BILLS-119-1-hr.zip")
+    for session in (1, 2):
+        (zip_dir / f"BILLS-118-{session}-s.zip").write_bytes(b"bad zip")
+
+    result = _run(tmp_path, "--types", "hr", "s")
+
+    _assert_bill_written(tmp_path)
+    assert result.returncode == 1, result.stderr
+    _assert_failure_summary(result, corrupt_zip_skipped=2, download_failed=3)
+
+
 @pytest.mark.parametrize("download_only", [False, True], ids=["full-run", "download-only"])
 def test_existing_archives_need_no_network_and_exit_zero(tmp_path, download_only):
     tasks = _download_tasks(tmp_path / "zips")
