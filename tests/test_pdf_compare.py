@@ -655,6 +655,25 @@ def test_image_only_upload_returns_scan_message_verbatim(image_only_pdfs, scan_s
     )
 
 
+@pytest.mark.slow
+@pytest.mark.parametrize("scan_side", ["start", "end"])
+def test_scan_decline_precedes_enrolled_decline_on_either_side(image_only_pdfs, scan_side):
+    scan = image_only_pdfs[0].read_bytes()
+    enrolled = ENROLLED_PDF.read_bytes()
+    start, end = (scan, enrolled) if scan_side == "start" else (enrolled, scan)
+    resp = _client().post(
+        "/api/compare",
+        files={
+            "start_file": ("start.pdf", start, "application/pdf"),
+            "end_file": ("end.pdf", end, "application/pdf"),
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == (
+        "This PDF appears to contain images rather than extractable text and cannot currently be compared."
+    )
+
+
 # ---------- Slow end-to-end engine test ------------------------------------
 
 
