@@ -547,6 +547,37 @@ def test_numbered_pdfs_still_diff_after_guard():
 # ---------- Image-only PDF decline guard (#550) ----------------------------
 
 
+def test_whitespace_only_pdf_is_declined(monkeypatch):
+    from dataclasses import replace
+
+    import deltatrack.compare.pdf as pdf_compare
+    from deltatrack.parsers.pdf_text import PrintPages
+
+    pages = _pages(0, 2)
+    printed = tuple(tuple(replace(line, text="   ") for line in page.lines) for page in pages)
+    read = PrintPages(printed, tuple({} for _ in pages))
+    monkeypatch.setattr(pdf_compare, "extract_print_pages", lambda _: read)
+
+    with pytest.raises(pdf_compare.UnsupportedLayoutError, match="images rather than extractable text"):
+        pdf_compare.compare_pdfs(b"start", b"end")
+
+
+def test_readable_pdf_with_blank_pages_is_not_declined(monkeypatch):
+    from dataclasses import replace
+
+    import deltatrack.compare.pdf as pdf_compare
+    from deltatrack.parsers.pdf_text import Line, PrintPages
+
+    pages = _pages(100, 2)
+    pages[-1] = replace(pages[-1], lines=(Line(None, ""), Line(None, "   ")))
+    read = PrintPages(tuple(page.lines for page in pages), tuple({} for _ in pages))
+    monkeypatch.setattr(pdf_compare, "extract_print_pages", lambda _: read)
+
+    canonical = pdf_compare.compare_pdfs(b"start", b"end")
+    assert canonical["changes"] == []
+    assert "text" in canonical["full_text"]["v1"]
+
+
 def _make_image_only_pdf(path: Path, *, first_page: int, page_count: int) -> None:
     """Rasterize corpus pages into a PDF with images and no selectable text."""
     pdfium = pytest.importorskip("pypdfium2")
