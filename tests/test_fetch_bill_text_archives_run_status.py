@@ -103,19 +103,19 @@ def _assert_bill_written(tmp_path: Path, number: int = 1) -> None:
 
 def _assert_failure_summary(result: subprocess.CompletedProcess[str], **counts: int) -> None:
     errors = [line for line in result.stderr.splitlines() if line.startswith("Error:")]
-    assert len(errors) == 1, result.stderr
-    for key in text_archives.FAILURE_STATS & counts.keys():
-        assert f"{key}={counts[key]}" in errors[0], errors[0]
+    summary = ", ".join(f"{key}={count}" for key, count in sorted(counts.items()))
+    assert errors == [f"Error: bill text batch incomplete: {summary}"], result.stderr
     assert result.stderr.splitlines()[-1] == errors[0]
 
 
-def test_corrupt_archive_fails_after_writing_healthy_bill(tmp_path):
+@pytest.mark.parametrize("overwrite_args", [(), ("--overwrite-existing",)], ids=["default", "overwrite"])
+def test_corrupt_archive_fails_after_writing_healthy_bill(tmp_path, overwrite_args):
     _archive(tmp_path / "zips" / "BILLS-119-2-hr.zip")
     corrupt = tmp_path / "zips" / "BILLS-119-1-hr.zip"
     healthy = (tmp_path / "zips" / "BILLS-119-2-hr.zip").read_bytes()
     corrupt.write_bytes(healthy[: len(healthy) // 2])
 
-    result = _run(tmp_path, "--convert-only")
+    result = _run(tmp_path, "--convert-only", *overwrite_args)
 
     _assert_bill_written(tmp_path)
     assert result.returncode == 1, result.stderr
@@ -137,10 +137,11 @@ def test_unreadable_member_fails_after_writing_healthy_bill(tmp_path):
     _assert_failure_summary(result, read_error_skipped=1)
 
 
-def test_healthy_conversion_exits_zero(tmp_path):
+@pytest.mark.parametrize("overwrite_args", [(), ("--overwrite-existing",)], ids=["default", "overwrite"])
+def test_healthy_conversion_exits_zero(tmp_path, overwrite_args):
     _archive(tmp_path / "zips" / "BILLS-119-1-hr.zip")
 
-    result = _run(tmp_path, "--convert-only")
+    result = _run(tmp_path, "--convert-only", *overwrite_args)
 
     _assert_bill_written(tmp_path)
     assert result.returncode == 0, result.stderr
