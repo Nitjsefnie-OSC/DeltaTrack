@@ -562,7 +562,8 @@ def test_whitespace_only_pdf_is_declined(monkeypatch):
         pdf_compare.compare_pdfs(b"start", b"end")
 
 
-def test_readable_pdf_with_blank_pages_is_not_declined(monkeypatch):
+@pytest.mark.parametrize("blank_first", [False, True], ids=["blank-last", "blank-first"])
+def test_readable_pdf_with_blank_pages_is_not_declined(monkeypatch, blank_first):
     from dataclasses import replace
 
     import deltatrack.compare.pdf as pdf_compare
@@ -570,6 +571,8 @@ def test_readable_pdf_with_blank_pages_is_not_declined(monkeypatch):
 
     pages = _pages(100, 2)
     pages[-1] = replace(pages[-1], lines=(Line(None, ""), Line(None, "   ")))
+    if blank_first:
+        pages.insert(0, pages.pop())
     read = PrintPages(tuple(page.lines for page in pages), tuple({} for _ in pages))
     monkeypatch.setattr(pdf_compare, "extract_print_pages", lambda _: read)
 
