@@ -131,7 +131,9 @@ jobs:
 
   # Browser tests. Includes the Playwright install.
   browser-tests:
-    runs-on: ubuntu-latest
+    # Keep the OS compatible with the locked Playwright browser installer.
+    # A moving runner label can advance before Playwright supports the new image.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
