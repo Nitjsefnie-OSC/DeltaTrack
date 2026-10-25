@@ -8,7 +8,8 @@ Financial classifier and analysis tools for DeltaTrack bill data.
 |---|---|
 | `classify_bill.py` | Rule-based classifier — imported by all notebooks and scripts |
 | `01_eda.ipynb` | Exploratory analysis: BBI dataset, XML node structure, PDF pipeline |
-| `02_financial_report.ipynb` | Financial summary report for a single bill |
+| `02_financial_report.ipynb` | Research report of financial clauses and selected appropriation candidates for one bill |
+| `appropriation_summary.py` | Groups selected candidates by full heading path and shows unresolved clauses as exclusions |
 | `03_classifier_stress_test.ipynb` | Interactive classifier validation across multiple bills |
 | `stress_test_analysis.py` | Script: parses all 7 reference bills, reports unknowns and FP risks |
 | `stress_test_detail.py` | Script: shows full text of unknown nodes per bill type |
@@ -16,6 +17,23 @@ Financial classifier and analysis tools for DeltaTrack bill data.
 | `committee_agreement.py` | Scores the figure typed as each account's appropriation against the answer key's figure for that account (committee reports, and one Legislative Branch spreadsheet), reported per source (ADR 0025, proposed, #796) |
 | `appropriation_resolver.py` | Picks the one figure an appropriations paragraph appropriates, the way the paragraph is drafted, or abstains |
 | `rollup_agreement.py` | Adds the typed figures up per agency and checks them against the committee report's "Total, <agency>" lines |
+
+## Notebook appropriation summary
+
+Run `02_financial_report.ipynb` from the repository root or this directory. Its default
+bill is the committed H.R. 4366 House-reported XML, so the example needs no download.
+`appropriation_summary.py` builds the selected subtotals and renders the collapsible table.
+Full source heading paths keep identically named accounts separate. Explicit "additional
+amount for the accounts and amounts specified" lists retain every named recipient and
+amount under their source section, without inferring new structural headings.
+
+This is research output, not validated budget authority. Unsupported multi-amount clauses
+and unclassified dollar-bearing clauses are shown as exclusions, and affected groups are
+marked incomplete. Selected amounts can span fiscal years; other classifier errors remain
+in scope for #115. The notebook does not change the product report or complete that issue.
+`tests/test_research_financial_report.py` runs the report cells and checks the Title I sum
+against the independent House committee report, plus named amounts, heading identity and
+exclusion behavior.
 
 ## Does the typed appropriation equal the committee report's?
 
