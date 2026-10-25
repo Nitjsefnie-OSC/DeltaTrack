@@ -2,13 +2,57 @@
 
 Financial classifier and analysis tools for DeltaTrack bill data.
 
+## Research question
+
+Can every dollar figure in a bill version be given the right meaning (what kind of
+money it is, which account it belongs to, and which fiscal year it funds), and can
+that meaning be checked against an official source written independently of the
+classifier?
+
+Finding a figure is not the question. Dollar amounts were removed from the report in
+#681 (#671) because figures were found but given the wrong meaning, and a wrong
+meaning makes every total built on it wrong. The bar for bringing them back is
+[ADR 0025](../../decisions/0025-financial-confidence-criteria.md) (proposed); this
+folder is where the work to meet it happens. Tracking: epic #147.
+
+## Exit criteria
+
+Under the proposed ADR, per-version financial interpretation is ready for product
+integration only when its stage 1 gate passes and the maintainer signs off. This does
+not establish readiness for totals, paired changes or their presentation:
+
+1. **Every figure is typed on its own**, not by clause or paragraph, with its effect
+   (adds money, removes money, neither, or unresolved), its fiscal year and its account
+   occurrence. Finer role labels are optional, but must be validated if exposed.
+2. **The types are matched against official sources on meaning**: the figure typed as
+   an account's appropriation equals the committee report's appropriation, and
+   rescission and limitation rows match figures of that type.
+3. **The validation set covers every kind of bill that appropriates**, with at least
+   two versions each, an authorization bill as a negative control and a holdout year.
+4. **No zero-tolerance error remains**: no wrong sign, no non-money figure counted as
+   money, no money under the wrong account or fiscal year, no unflagged missing figure.
+5. **Every disagreement with the source is hand-traced**, and none is a classifier
+   error.
+6. **The relevant review cases pass as acceptance tests**, with expected results justified
+   from the bill text. The #724 Title I shortfall is fixed in the notebook summary (#854)
+   and retained as a regression case; #736's omitted advance-appropriation comparison
+   belongs to the later paired-change gate, not stage 1.
+
+ADR 0025 holds the reasoning and full acceptance boundaries. Heading recovery and
+placement can improve independently of financial displays. Representative bill kinds
+and reliable source placement are required capabilities, not dependencies on merging
+#734, #739 or #736. Neither PDF/XML agreement nor parity with this notebook independently
+proves financial meaning. The research paths below provide bounded evidence, not a
+claim that these exit criteria have been met; adopting the ADR would not make them met.
+
 ## Files
 
 | File | Purpose |
 |---|---|
 | `classify_bill.py` | Rule-based classifier — imported by all notebooks and scripts |
 | `01_eda.ipynb` | Exploratory analysis: BBI dataset, XML node structure, PDF pipeline |
-| `02_financial_report.ipynb` | Financial summary report for a single bill |
+| `02_financial_report.ipynb` | Research report of financial clauses and selected appropriation candidates for one bill |
+| `appropriation_summary.py` | Groups selected candidates by full heading path and shows unresolved clauses as exclusions |
 | `03_classifier_stress_test.ipynb` | Interactive classifier validation across multiple bills |
 | `stress_test_analysis.py` | Script: parses all 7 reference bills, reports unknowns and FP risks |
 | `stress_test_detail.py` | Script: shows full text of unknown nodes per bill type |
@@ -16,6 +60,23 @@ Financial classifier and analysis tools for DeltaTrack bill data.
 | `committee_agreement.py` | Scores the figure typed as each account's appropriation against the answer key's figure for that account (committee reports, and one Legislative Branch spreadsheet), reported per source (ADR 0025, proposed, #796) |
 | `appropriation_resolver.py` | Picks the one figure an appropriations paragraph appropriates, the way the paragraph is drafted, or abstains |
 | `rollup_agreement.py` | Adds the typed figures up per agency and checks them against the committee report's "Total, <agency>" lines |
+
+## Notebook appropriation summary
+
+Run `02_financial_report.ipynb` from the repository root or this directory. Its default
+bill is the committed H.R. 4366 House-reported XML, so the example needs no download.
+`appropriation_summary.py` builds the selected subtotals and renders the collapsible table.
+Full source heading paths keep identically named accounts separate. Explicit "additional
+amount for the accounts and amounts specified" lists retain every named recipient and
+amount under their source section, without inferring new structural headings.
+
+This is research output, not validated budget authority. Unsupported multi-amount clauses
+and unclassified dollar-bearing clauses are shown as exclusions, and affected groups are
+marked incomplete. Selected amounts can span fiscal years; other classifier errors remain
+in scope for #115. The notebook does not change the product report or complete that issue.
+`tests/test_research_financial_report.py` runs the report cells and checks the Title I sum
+against the independent House committee report, plus named amounts, heading identity and
+exclusion behavior.
 
 ## Does the typed appropriation equal the committee report's?
 
