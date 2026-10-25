@@ -11,9 +11,9 @@ only the first. #681 (#671) removed the financial table and every paired amount 
 report and the export, because the pipeline could not say what a dollar figure *is*. The
 rule since then has been that money stays out until the team is confident in how it is
 added back. Nobody has written down what "confident" means, so there is no way to tell
-when a proposal clears the bar. Without that, every attempt is judged case by case. The
-research folder (`docs/research/financial-semantics/`) has no research question or exit
-criteria either.
+when a proposal clears the bar. This proposal supplies the research question and exit
+criteria as well as the product acceptance boundaries. Adoption agrees those boundaries;
+it does not certify the research or authorize restoring financial displays.
 
 **The meaning of a figure is the hard part, not finding it.** An appropriations paragraph
 carries several kinds of number: the appropriation itself, sub-allocations carved out of
@@ -23,8 +23,9 @@ look identical on the page. A figure can appear in the source, the diff and the 
 the same value and still be wrong, because it was given the wrong meaning. Adding it to a
 total then produces a wrong number.
 
-**The errors found so far are errors of meaning.** Review of #736 at `624e77ed` found
-four, each traced to the bill text:
+**Historical motivation.** [Review of #736 at `624e77ed`](https://github.com/civictechdc/DeltaTrack/pull/736#pullrequestreview-5361107545)
+found four cases, each traced to the bill text. These describe that reviewed implementation,
+not a readiness assessment of every later research path:
 
 1. **H.R. 4366, Medical Services (v4 to v5).** The opening $71 billion appropriation is
    typed as a rescission, because "is hereby rescinded" appears later in the same
@@ -46,18 +47,43 @@ figures after the first in six sections that each appropriate several named amou
 The same rollup merged three different `SALARIES AND EXPENSES` accounts into one row,
 because it grouped them by their leaf heading.
 
-These are four kinds of failure: the wrong sign (1), the wrong figure picked (3), a figure
-missing (2 and #724), and a wrong label (4 and the merged accounts). Case 1 and the #724
-shortfall come straight from one design choice in the research classifier
-(`classify_bill.py`). It assigns a type to a clause rather than to a figure, gives the
-first clause the type of the whole paragraph, and keeps one figure per clause, so a
-clause with nine appropriations has nowhere to record the other eight. Case 3 starts as a
-pattern miss ("not to exceed a total of" escapes the ceiling rule), and the same choice
-turns it into a wrong total: keeping one figure means the wrong pick displaces the right
-one. Tuning patterns cannot fix the design, because the data has no slot for "this
-figure is X."
+These expose separate failures: the wrong sign (1), wrong selection (3), an omitted
+comparison (2), a wrong label (4), and incomplete aggregation or account identity (#724).
+The clause-based `classify_bill.py` still inherits a paragraph's label for the primary
+clause and retains only one selected amount per clause. That path cannot represent each
+figure's meaning, even if selection patterns improve.
 
-**The existing independent check would pass these errors.** [0009](0009-validation-ground-truth.md)
+**Existing research is progress, not demonstrated readiness.** The
+[research README](../research/financial-semantics/README.md) describes the current paths
+and their limits; their implementations and existing tests provide the following evidence:
+
+- **The #724 Title I shortfall and leaf-name merging are fixed in the notebook summary**
+  (#854). `appropriation_summary.py` retains named additional amounts and groups by full
+  source heading path. `tests/test_research_financial_report.py` checks the $17.474 billion
+  Title I result against House Report 118-122, distinct same-named accounts, and visible
+  exclusions for unsupported clauses. This is a regression case, not an unresolved defect
+  in that summary. The summary still selects classifier candidates, can mix fiscal years,
+  and does not validate budget authority.
+- **Typed selection and rollup are now measured** (#845). `committee_agreement.py` scores
+  selected figures against account answer keys, with committee reports and the Legislative
+  Branch spreadsheet reported separately. `appropriation_resolver.py` adds drafting-based
+  selection, named itemised lines and selected sums. Its tests include a proviso cap that
+  must not replace the appropriation and a wrong-line negative control through the scorer.
+  These improve on recall alone, but are not an all-figure effect/year/account model.
+- **The original cases are not all resolved by that work.** The research classifier still
+  lets later rescission wording label the opening appropriation (case 1); its ceiling
+  pattern still misses "not to exceed a total of" (case 3). On those committed XML cases,
+  the newer resolver selects the correct $10,554,261,000 in case 3 but abstains on case 1:
+  it does not change paragraph classification. The selection repair is not per-figure typing.
+  Cases 2 and 4 concern #736's comparison and amended-law flag, not capabilities supplied
+  by the new selection research. They remain acceptance cases for any replacement.
+- **Readiness gaps remain visible.** The research documents gross/net and liquidating
+  appropriation differences, untyped money, answer-key mapping problems and rollup scope
+  mismatches. Its held-out keys have since informed rule changes, so current results are
+  not an unbiased holdout estimate. Passing its bounded regression gates does not satisfy
+  this record's full validation set, typed matching or stage sign-off.
+
+**Recall alone would pass meaning errors.** [0009](0009-validation-ground-truth.md)
 validates extraction against Senate committee reports. It counts an account as recalled
 when the report's figure appears anywhere in the extraction under the right agency, and
 it leaves out rescission rows. In case 3 the $10.55 billion figure is present, so the
@@ -66,7 +92,9 @@ check measures whether a figure was found. It says nothing about the meaning ass
 to it.
 
 **Official sources do not cover every version.** A Senate committee report covers the
-Senate-reported version of a bill. House reports print their account tables as images.
+Senate-reported version of a bill. House account tables can be images; usable evidence
+must be established per report. House Report 118-122 supplies the Title I total used in
+the notebook regression, not a demonstrated general account-level validation path.
 A diff usually compares other versions: engrossed text, the chambers' amendments, the
 enrolled bill. For many versions there is no independent source at all.
 
@@ -84,6 +112,32 @@ account is a structure defect, not a typing one.
 Money returns to DeltaTrack in stages. Each stage ships when its criteria below pass as a
 CI gate and the maintainer signs off. Being "confident" means exactly that: a passing
 gate against official sources, with every disagreement explained.
+
+### Capabilities, not branch dependencies
+
+| Capability | Acceptance boundary |
+|---|---|
+| PDF/XML heading recovery and placement | Preserve supported headings, their repeated occurrences and defensible scope. A heading-name coverage check cannot prove these relationships. Placement checks must reject invented or reordered ancestors and unrelated content inheriting a heading. |
+| Individual financial figures | Establish each figure's effect, fiscal year and account from its source occurrence, with the typed official-source checks below. Correct placement alone says nothing about financial meaning. |
+| Financial totals | Pass stage 1 and independently reconcile the aggregation's scope and arithmetic at stage 2. Correct individual values do not establish an additive total. |
+| Cross-version financial comparisons | Require the separate stage 3 decision. Accurate per-version figures or totals do not validate correspondence or which changes a comparison includes. |
+| Presentation of validated results | Show only claims whose stage has passed, with source traceability and machine-readable uncertainty. Inspectability and warnings do not replace validation. |
+
+Heading work has independent value for navigation and structural correctness and may ship
+without financial displays. Its acceptance follows the structural decisions, especially
+[0012](0012-pdf-heading-levels.md), [0014](0014-leveled-heading-tree-scope.md) and
+[0018](0018-text-triggers-are-financial-only.md); this record does not amend them.
+
+History: #734 contributes typography signals, wrapped-heading repair, agency-scope work
+and a PDF/XML ledger-location scorer. That scorer measures placement of aligned amounts,
+not financial meaning or total accuracy. #739 contributes XML heading preservation and
+representative bill types; preserving names does not settle ambiguous scope or repeated
+occurrence identity. #736 contributes source-span drill-down and coverage information.
+These contributions can be adapted separately to the current canonical contract and
+single renderer ([0006](0006-canonical-diff-contract.md),
+[0007](0007-single-renderer.md)). Their Git ancestry requires neither merging the stack
+nor retaining its older financial implementation. Preserve contribution provenance and
+authorship when carrying work forward.
 
 ### Every figure gets its own type
 
@@ -104,14 +158,19 @@ narrative #115 asks for, but only the effect is required to ship a stage. The re
 vocabulary is reused rather than replaced. What changes is that the label attaches to a
 figure, so a paragraph can hold an appropriation and a rescission at once.
 
+These labels are vocabulary, not a keyword-to-effect rule. An appropriation stated as
+"not to exceed" is not automatically a non-additive ceiling; its operative meaning and
+the source's accounting basis govern the type.
+
 Two further properties are part of a figure's type, because a total is wrong without
 them:
 
 - **The fiscal year it funds.** An advance appropriation and a current-year appropriation
   in the same account are not summed together.
 - **The account it belongs to**, identified by its full position in the bill's
-  structure, not its leaf heading. Per 0018 this comes from the tree, never from the
-  wording.
+  structure and source occurrence, not its leaf heading. Repeated headings must not
+  collapse distinct occurrences ([0019](0019-observation-identity.md)). Per 0018 placement
+  comes from the tree, never from financial wording.
 
 ### The evidence is official sources, matched on meaning
 
@@ -131,30 +190,34 @@ Matching is on meaning, which is stricter than 0009's recall rule:
 - for totals, a title's typed appropriations reconcile to the source's `Total, title`
   row.
 
-Hand-tagged examples, such as the five cases above, become acceptance cases: regression
-tests with expected results justified from the bill text and, where one exists, the
-official source. They are not evidence of accuracy. Hand tagging is often wrong, and
-expected values written by someone reading the same bill as the classifier share its
-blind spots (0009).
+Hand-tagged examples, such as the five cases above, become stage-appropriate acceptance
+cases: regression tests with expected results justified from the bill text and, where
+one exists, the official source. They are not independent evidence of accuracy. Hand
+tagging is often wrong, and expected values written by someone reading the same bill as
+the classifier share its blind spots (0009).
 
 **Versions with no official source are covered by extrapolation, and the limits are
-stated.** The engine is deterministic ([0008](0008-deterministic-engine.md)), so a
-provision whose text is identical to one in a validated version gets the same types.
+stated.** The engine is deterministic ([0008](0008-deterministic-engine.md)), so identical
+text with the same relevant account and fiscal-year context gets the same interpretation.
+Text equality alone does not establish that context.
 Where a provision's text changed, confidence rests on how the classifier performs across
 the validation set rather than on direct evidence for that version.
 
 ### The validation set covers every kind of bill that appropriates
 
 - **Every vehicle kind:** regular, omnibus, supplemental, continuing resolution,
-  reconciliation, and an authorizing law with an appropriations division. These are the
-  `vehicle` values #739 proposes for the corpus manifest.
+  reconciliation, and an authorizing law with an appropriations division. This requires
+  representative committed fixtures with their kinds recorded, not #739's particular
+  manifest field or the rest of that PR.
 - **At least two versions of each bill**, because a diff compares versions.
 - **An authorization bill as a negative control:** no figure that is authorized rather
   than appropriated may be typed as adding money.
 - **A holdout year** that the rules were not tuned on, as 0009 requires.
 - **PDF against XML:** where the PDF and XML trees and provision text agree, the figures
-  get identical types. Where they disagree, no agreement is required. That gap belongs
-  to the structural work, not this record.
+  get identical types for equivalent context. This is a consistency invariant, not
+  independent correctness evidence: both readers can share a wrong placement or type.
+  Structural disagreement is traced separately; affected financial claims cannot be
+  declared validated by dropping those cases from the comparison.
 
 ### The bar: every disagreement explained, and none is ours
 
@@ -172,27 +235,33 @@ tuning toward the number and hides which errors matter.
 - a figure that adds no money counted as if it did, such as a ceiling, a sub-allocation
   or an authorization;
 - money filed under the wrong account;
+- the wrong fiscal year, or a gross/net or other scope mismatch that changes what is added;
 - a missing figure that is not flagged.
 
-Label errors that change no total, such as a wrong role or a wrong amended-law flag,
-still count against the bar above. Each must be traced and fixed, but one does not block
-a stage on its own.
+Optional finer labels can be withheld rather than delay a stage. If a role or
+amended-law flag is exposed, it must be checked and corrected; calling it optional does
+not permit a false claim in the report or export.
 
 ### Uncertainty lives in the data, per figure
 
 A figure the classifier cannot type is marked `unresolved` in the document, not omitted
 and not guessed. The document states its own coverage: how many figures each version
-holds and how many are typed. A total is shown only when no figure beneath it is
-unresolved. A consumer holding only `diff.json` can therefore see what is known and what
-is not, which is the property 0006 requires. A banner can still tell a reader to check
-the bill text, but it does not count as handling uncertainty.
+holds and how many are typed. Source ranges must resolve to the figure's own text, and
+coverage must count occurrences, not distinct strings. Dropping one of two identical
+occurrences or pointing a figure at another clause must fail the corresponding check.
+A total is shown only when no figure within its claimed scope, or its placement, is
+unresolved and the stage 2 gate passes. A consumer holding only `diff.json` can therefore
+see what is known and what is not, which is the property 0006 requires. A banner can
+still tell a reader to check the bill text, but it does not count as handling uncertainty.
 
 ### Money returns in order of how strong the claim is
 
 1. **Each figure's type, per version, unpaired.** This states what a version contains.
    Gate: the matching rules, the validation set and the zero-tolerance rule above.
 2. **Totals**, rolled up from account to title. Gate: title totals reconcile to the
-   official source.
+   official source on the same fiscal-year and accounting basis. Counting a parent and
+   its sub-allocation twice, mixing years, or treating liquidating appropriations as new
+   budget authority must not pass merely because individual figures were read correctly.
 3. **Paired changes between versions.** 0006 already calls pairing a separate claim, and
    case 2 is a pairing failure, not a typing one. Its criteria are not set here. They
    need their own decision once stage 1 has shipped.
@@ -238,9 +307,11 @@ gate, not by judgement.
   found. The committee-report answer keys also need to be guarded against drift (#293),
   since this record makes them load-bearing for money as well as extraction.
 - **#736's per-version ledger matches stage 1 in shape**, but it types clauses and leans
-  on a banner. To ship it would need per-figure types and a passing stage 1 gate. Its ADR
-  0023 would need to defer to this record.
-- **Coverage depends on #739** for the `vehicle` field and the added bill kinds.
+  on a banner. Its inspectability concepts can be retained without adopting its data
+  model, comparison or tabs. Any successor needs a passing gate for each claim it exposes;
+  proposed ADR 0023 cannot grant an exception.
+- **Coverage and reliable placement are capability dependencies**, not dependencies on
+  #739 or #734 as whole PRs. Heading recovery can proceed independently of financial work.
 - **A known limitation remains.** The provisions a diff surfaces are the ones whose text
   changed, and in a version with no official source those are exactly the figures with
   no direct evidence. Extrapolation from the validation set is the best available, and

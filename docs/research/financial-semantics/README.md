@@ -17,26 +17,33 @@ folder is where the work to meet it happens. Tracking: epic #147.
 
 ## Exit criteria
 
-The research is done, and its classifier is ready to move into the product, when the
-first stage of ADR 0025 passes:
+Under the proposed ADR, per-version financial interpretation is ready for product
+integration only when its stage 1 gate passes and the maintainer signs off. This does
+not establish readiness for totals, paired changes or their presentation:
 
 1. **Every figure is typed on its own**, not by clause or paragraph, with its effect
-   (adds money, removes money, neither, or unresolved), its role (the labels in
-   `classify_bill.py`), its fiscal year and its account.
+   (adds money, removes money, neither, or unresolved), its fiscal year and its account
+   occurrence. Finer role labels are optional, but must be validated if exposed.
 2. **The types are matched against official sources on meaning**: the figure typed as
    an account's appropriation equals the committee report's appropriation, and
    rescission and limitation rows match figures of that type.
 3. **The validation set covers every kind of bill that appropriates**, with at least
    two versions each, an authorization bill as a negative control and a holdout year.
 4. **No zero-tolerance error remains**: no wrong sign, no non-money figure counted as
-   money, no money under the wrong account, no unflagged missing figure.
+   money, no money under the wrong account or fiscal year, no unflagged missing figure.
 5. **Every disagreement with the source is hand-traced**, and none is a classifier
    error.
-6. **The known review cases pass as acceptance tests**: the four from #736 and the
-   Title I shortfall from #724, each with expected results justified from the bill
-   text.
+6. **The relevant review cases pass as acceptance tests**, with expected results justified
+   from the bill text. The #724 Title I shortfall is fixed in the notebook summary (#854)
+   and retained as a regression case; #736's omitted advance-appropriation comparison
+   belongs to the later paired-change gate, not stage 1.
 
-ADR 0025 holds the reasoning behind each criterion.
+ADR 0025 holds the reasoning and full acceptance boundaries. Heading recovery and
+placement can improve independently of financial displays. Representative bill kinds
+and reliable source placement are required capabilities, not dependencies on merging
+#734, #739 or #736. Neither PDF/XML agreement nor parity with this notebook independently
+proves financial meaning. The research paths below provide bounded evidence, not a
+claim that these exit criteria have been met; adopting the ADR would not make them met.
 
 ## Files
 
