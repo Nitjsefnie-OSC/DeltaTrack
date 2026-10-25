@@ -20,10 +20,10 @@ from html import escape
 from importlib.resources import files
 
 from deltatrack.formatters._text import word_diff
-from deltatrack.formatters.canonical import view_from_canonical
+from deltatrack.formatters.canonical_view import view_from_canonical
 from deltatrack.formatters.print_layout import printed_document
 from deltatrack.formatters.view_model import ChangeView, DiffView
-from deltatrack.palette import root_block
+from deltatrack.palette import referenced, root_block
 
 __all__ = ["format_diff_html"]
 
@@ -63,7 +63,7 @@ def _build_card(change: ChangeView, index: int) -> str:
 
     parts = [f'<div class="change{extra_card_class}" id="change-{index}" data-type="{ct}">']
     parts.append('<div class="change__header">')
-    parts.append(f'<span class="change-type" data-type="{ct}">{ct}</span>')
+    parts.append(f'<span class="badge" data-type="{ct}">{ct}</span>')
     parts.append(f"<h3{h3_class}>{change.heading_html}</h3>")
     if change.section_number:
         parts.append(f'<span class="section-number">{escape(change.section_number)}</span>')
@@ -141,20 +141,20 @@ def _build_nav_item(change: ChangeView, index: int) -> str:
     return (
         f'<li class="{nav_class}" data-type="{ct}">'
         f'<a href="#change-{index}">'
-        f'<span class="change-type" data-type="{ct}">{ct}</span> '
+        f'<span class="badge" data-type="{ct}">{ct}</span> '
         f"{label}"
         f"</a></li>"
     )
 
 
 def _group_changes_by_node(view: DiffView) -> tuple[dict, dict[str, list[int]]]:
-    """Nest change indices by node_path; degraded changes fall back flat (#172).
+    """Nest change indices by node_path; changes naming no node fall back flat.
 
-    Returns ``(root, fallback)``: ``root`` is a nested ``{"children": {(label,
-    level): node}, "items": [change indices]}`` tree keyed by node_path
-    segments, insertion-ordered by first appearance; ``fallback`` maps
-    ``group_label`` (or "Uncategorized") to the indices of changes the join
-    couldn't place (empty node_path) — never worse than the old flat grouping.
+    Returns ``(root, fallback)``: ``root`` is a nested ``{"children": {(id, label,
+    level): node}, "items": [change indices]}`` tree keyed by node_path steps, so
+    two headings with the same label stay apart (#785); ``fallback`` maps
+    ``group_label`` (or "Uncategorized") to the indices of changes the document
+    names no node for (empty node_path).
     Removed changes are in neither: they belong to the removed section
     (``_group_removed``), never to the later version's outline.
     """
@@ -179,6 +179,21 @@ def _fallback_labels(fallback: dict[str, list[int]]) -> list[str]:
     if "Uncategorized" in fallback:
         labels.append("Uncategorized")
     return labels
+
+
+UNPLACED_SUFFIX = " (not placed in the outline)"
+
+
+def _fallback_heading(label: str, outline: dict) -> str:
+    """The heading a fallback group shows (#816).
+
+    A change the document names no node for groups under its path's top label. Beside
+    an outline that label can be a real group's too ("TITLE I"), and two headings with
+    one name read as one heading split in two, so the fallback says it is not that
+    group. With no outline at all there is nothing to confuse it with, and
+    "Uncategorized" never names a heading.
+    """
+    return label if not outline["children"] or label == "Uncategorized" else label + UNPLACED_SUFFIX
 
 
 REMOVED_SECTION_LABEL = "Removed from the earlier version"
@@ -233,7 +248,7 @@ def _removed_pointers(view: DiffView) -> dict[tuple[str, ...], int]:
     A later-version group whose label path is exactly one of these keys says that
     removals were under a heading with the same name in the earlier version. The
     match is the whole label sequence, compared exactly: a shared deepest label
-    ("(a)", "sec. 205") or a heading that moved under an added wrapper is not the
+    ("(a)", "Sec. 205") or a heading that moved under an added wrapper is not the
     same path. A pointer is a same-name match, not a claim that it is the same
     place, so it is only rendered; it never places, groups or counts a removal.
     """
@@ -254,6 +269,29 @@ def _pointer_html(count: int, target_id: str) -> str:
     )
 
 
+def _label_path_counts(tree_nodes: list[dict] | None) -> dict[tuple[str, ...], int]:
+    """Label breadcrumb -> how many nodes of the later tree carry it (#816).
+
+    Every heading counts, with changes under it or not, so a removed-section pointer
+    can tell whether its label path names one heading or several. A node is a step on
+    the path exactly when it is one in the outline's breadcrumbs
+    (``canonical_view._node_chains``): it has a label and an id. Others are hoisted.
+    """
+    counts: dict[tuple[str, ...], int] = {}
+
+    def walk(ns: list[dict], path: tuple[str, ...]) -> None:
+        for n in ns:
+            label = (n.get("label") or "").strip()
+            step = bool(label and n.get("id"))
+            p = (*path, label) if step else path
+            if step:
+                counts[p] = counts.get(p, 0) + 1
+            walk(n.get("children") or [], p)
+
+    walk(tree_nodes or [], ())
+    return counts
+
+
 def _subtree_count(node: dict) -> int:
     return len(node["items"]) + sum(_subtree_count(c) for c in node["children"].values())
 
@@ -261,45 +299,39 @@ def _subtree_count(node: dict) -> int:
 def _removed_order_map(tree_nodes: list[dict] | None) -> dict[tuple[str, ...], int]:
     """Label breadcrumb -> earlier document order, for the removed section (#784).
 
-    ``removed_path`` carries labels without levels, so this keys
-    ``_node_order_map``'s v1 order by labels alone; where two paths differ only
-    by level, the earlier one sets the position.
+    ``removed_path`` carries the earlier version's labels as the document states
+    them, so the section is nested and ordered by labels; where two paths share
+    their labels, the earlier one sets the position. Unlabeled nodes are hoisted,
+    as in the table of contents.
     """
     order: dict[tuple[str, ...], int] = {}
-    for path, rank in _node_order_map(tree_nodes).items():
-        order.setdefault(tuple(label for label, _level in path), rank)
-    return order
 
-
-def _node_order_map(tree_nodes: list[dict] | None) -> dict[tuple, int]:
-    """(label, level) breadcrumb -> v2 document order, for sorting groups (#172).
-
-    Grouping by first appearance in the change list can deviate from bill
-    order — a change filed in a late group but appearing early in the change
-    list would hoist that group above earlier titles. Sorting siblings
-    by the tree's own document order keeps groups in bill order regardless of
-    change order. Same labeled-ancestor hoisting convention as the join, so
-    the keys match node_path prefixes exactly.
-    """
-    order: dict[tuple, int] = {}
-    counter = 0
-
-    def walk(ns: list[dict], path: tuple) -> None:
-        nonlocal counter
+    def walk(ns: list[dict], path: tuple[str, ...]) -> None:
         for n in ns:
             label = (n.get("label") or "").strip()
-            p = path + ((label, n.get("level") or ""),) if label else path
-            if label and p not in order:
-                order[p] = counter
-                counter += 1
+            p = (*path, label) if label else path
+            if label:
+                order.setdefault(p, len(order))
             walk(n.get("children") or [], p)
 
     walk(tree_nodes or [], ())
     return order
 
 
+def _in_tree_order(node: dict, order: dict[str, int]) -> list:
+    """A later-version group's children in the tree's preorder.
+
+    ``order`` is ``DiffView.node_order``: each node id's position, counted while the
+    view walked the tree, so nothing here reads a position out of an id's text (#816).
+    A group whose id the walk didn't see keeps its first-appearance order, after the
+    rest.
+    """
+    last = len(order)
+    return sorted(node["children"].items(), key=lambda item: order.get(item[0][0], last))
+
+
 def _ordered_children(node: dict, path: tuple, order_map: dict[tuple, int] | None):
-    """A group node's children sorted by the map's document order, insertion
+    """A removed group's children sorted by the map's document order, insertion
     order for paths the map doesn't know (they trail, mutual order kept)."""
     items = list(node["children"].items())
     if not order_map:
@@ -314,7 +346,6 @@ def _ordered_children(node: dict, path: tuple, order_map: dict[tuple, int] | Non
 
 def _build_change_groups(
     view: DiffView,
-    order_map: dict[tuple, int] | None = None,
     removed_order: dict[tuple[str, ...], int] | None = None,
 ) -> str:
     """Group nav items under nested collapsible tree-node headers (#172).
@@ -324,8 +355,7 @@ def _build_change_groups(
     number ``applyFilters`` recomputes, since its ``querySelectorAll`` is
     recursive. Changes without a node_path keep the old flat ``group_label``
     grouping, trailing the tree groups ("Uncategorized" last). Sibling groups
-    follow v2 document order when ``order_map`` is given (see
-    ``_node_order_map``), first appearance otherwise. Removed changes trail
+    follow the later version's document order (``_in_tree_order``). Removed changes trail
     everything in one "Removed from the earlier version" group nested by their
     earlier breadcrumb (``_removed_nav_html``).
     `_build_nav_item`'s <li> is unchanged — only the wrapping differs.
@@ -335,17 +365,16 @@ def _build_change_groups(
         return "<ul></ul>"
     root, fallback = _group_changes_by_node(view)
 
-    def render(seg: tuple[str, str], node: dict, path: tuple) -> str:
-        label, _level = seg
-        p = path + (seg,)
+    def render(seg: tuple[str, str, str], node: dict) -> str:
+        _id, label, _level = seg
         items = "".join(_build_nav_item(view.changes[i], i) for i in node["items"])
-        kids = "".join(render(s, c, p) for s, c in _ordered_children(node, p, order_map))
+        kids = "".join(render(s, c) for s, c in _in_tree_order(node, view.node_order))
         return _nav_group_html(label, _subtree_count(node), f"<ul>{items}</ul>{kids}")
 
-    blocks = [render(seg, node, ()) for seg, node in _ordered_children(root, (), order_map)]
+    blocks = [render(seg, node) for seg, node in _in_tree_order(root, view.node_order)]
     for label in _fallback_labels(fallback):
         items = "".join(_build_nav_item(view.changes[i], i) for i in fallback[label])
-        blocks.append(_nav_group_html(label, len(fallback[label]), f"<ul>{items}</ul>"))
+        blocks.append(_nav_group_html(_fallback_heading(label, root), len(fallback[label]), f"<ul>{items}</ul>"))
     blocks.append(_removed_nav_html(view, removed_order))
     return "".join(blocks)
 
@@ -384,71 +413,23 @@ def _walk_tree(nodes: list[dict]):
         yield from _walk_tree(n.get("children") or [])
 
 
-class _WholeLines:
-    """Where each line of a text starts, grouped by the line's exact text.
+def _node_anchor_offset(full_text: str, node: dict) -> int | None:
+    """Char offset of the row a tree node's table-of-contents link jumps to.
 
-    Answers "the last line before ``end`` that is exactly ``label``" by bisection,
-    where ``str.rfind`` scans backwards and, for a label with no such line, scans the
-    whole text. A report resolves every TOC node against one text, so an omnibus
-    with thousands of nodes paid that scan thousands of times over megabytes of text.
-
-    Only lines with a newline on both sides are indexed: the first line has none
-    before it and an unterminated last line none after, and ``rfind("\n" + label +
-    "\n")`` cannot match either.
+    The producer records the row a node's heading is printed on (``heading_span``,
+    #785), so the link goes there. A node without one (no heading row was printed
+    for it, or a document from before node identity) jumps to the row its own
+    ``full_text_span`` starts on. Nothing here searches the text for a label: that
+    search found a matching line, not the node's heading, and was wrong where the
+    two differ ("Receipts collected", #766).
     """
-
-    def __init__(self, text: str) -> None:
-        self._text = text
-        self._starts: dict[str, list[int]] = {}
-        segments = text.split("\n")
-        pos = len(segments[0]) + 1
-        for line in segments[1:-1]:
-            self._starts.setdefault(line, []).append(pos)
-            pos += len(line) + 1
-
-    def last_before(self, label: str, end: int) -> int:
-        """``self._text.rfind("\n" + label + "\n", 0, end) + 1`` when found, else -1."""
-        if "\n" in label:
-            pos = self._text.rfind("\n" + label + "\n", 0, end)
-            return pos + 1 if pos != -1 else -1
-        starts = self._starts.get(label, [])
-        # The match runs from the newline before the line through the one after it, so a
-        # line starting at s ends its match at s + len(label) + 1, which must be <= end.
-        i = bisect_right(starts, end - len(label) - 1)
-        return starts[i - 1] if i else -1
-
-
-def _node_anchor_offset(full_text: str, node: dict, lines: _WholeLines | None = None) -> int | None:
-    """Char offset of the heading ROW a tree node should jump to.
-
-    A node's ``full_text_span`` locates its *content*: for an interior node that is
-    its own heading line, but for a content node (account/section) it's the body,
-    which sits below an own-line heading equal to the node's ``label``. To land the
-    TOC on the heading rather than one line into the body, resolve the anchor from
-    the label:
-
-      - if the span's own line already starts with the label, it IS the heading;
-      - else jump to the nearest preceding line equal to the label (the own-line
-        heading the serializer emitted just above the body);
-      - else (e.g. a ``SEC. NN.`` run-in, whose label is the lowercased number and
-        never appears as a bare line) fall back to the span's line start — the
-        run-in line, which is the right anchor for a section.
-
-    Deriving from the label keeps this a renderer concern (no extra contract field)
-    and is robust to duplicate account names: the nearest preceding match wins.
-
-    A caller resolving many nodes against one text passes ``lines``, built once from
-    that text; without it each call indexes the text afresh.
-    """
+    heading = node.get("heading_span")
+    if heading:
+        return heading["start"]
     span = node.get("full_text_span")
     if not span:
         return None
-    line_start = full_text.rfind("\n", 0, span["start"]) + 1
-    label = node.get("label") or ""
-    if not label or full_text.startswith(label, line_start):
-        return line_start
-    pos = (lines or _WholeLines(full_text)).last_before(label, span["start"])
-    return pos if pos != -1 else line_start
+    return full_text.rfind("\n", 0, span["start"]) + 1
 
 
 def _build_tree_nav(tree_nodes: list[dict], full_text: str) -> str:
@@ -465,10 +446,8 @@ def _build_tree_nav(tree_nodes: list[dict], full_text: str) -> str:
     if not tree_nodes:
         return '<p class="tree-empty">No sections detected.</p>'
 
-    lines = _WholeLines(full_text)
-
     def link(node: dict) -> str:
-        off = _node_anchor_offset(full_text, node, lines)
+        off = _node_anchor_offset(full_text, node)
         label = escape(node["label"])
         return f'<a href="#fb-off-{off}">{label}</a>' if off is not None else f"<span>{label}</span>"
 
@@ -515,7 +494,6 @@ def _build_tree_nav(tree_nodes: list[dict], full_text: str) -> str:
 def _build_sidebar(
     view: DiffView,
     canonical: dict | None = None,
-    order_map: dict[tuple, int] | None = None,
     removed_order: dict[tuple[str, ...], int] | None = None,
 ) -> str:
     """Render the sidebar with both view variants inside one ``<nav>``.
@@ -534,8 +512,6 @@ def _build_sidebar(
     were removed together (#462).
     """
     tree_v2 = (canonical.get("tree") or {}).get("v2") if (canonical and canonical.get("tree")) else None
-    if order_map is None:
-        order_map = _node_order_map(tree_v2)
     if removed_order is None:
         removed_order = _removed_order_map(((canonical or {}).get("tree") or {}).get("v1"))
     full_text_v2 = (canonical.get("full_text") or {}).get("v2") if canonical else None
@@ -551,7 +527,7 @@ def _build_sidebar(
         '<label class="filter-row"><input type="radio" name="change-filter" value="all" checked> All</label>\n'
         '<label class="filter-row"><input type="radio" name="change-filter" value="structural"> Structural</label>\n'
         "</div>\n"
-        f"{_build_change_groups(view, order_map, removed_order)}\n"
+        f"{_build_change_groups(view, removed_order)}\n"
         "</div>"
     )
     # The tree builder owns the navigation outright (#462). It also renders the
@@ -600,7 +576,7 @@ def _summary_bar_html(summary: dict[str, int]) -> str:
         if count > 0:
             items.append(
                 f'<span class="summary-item">'
-                f'<span class="change-type" data-type="{key}">{key}</span> '
+                f'<span class="badge" data-type="{key}">{key}</span> '
                 f"<strong>{count}</strong>"
                 f"</span>"
             )
@@ -636,8 +612,8 @@ def _heading(bill: dict) -> str:
 
 def _cards_section_html(
     view: DiffView,
-    order_map: dict[tuple, int] | None = None,
     removed_order: dict[tuple[str, ...], int] | None = None,
+    later_paths: dict[tuple[str, ...], int] | None = None,
 ) -> str:
     """Cards section: cards grouped under their tree-node headings (#172).
 
@@ -646,8 +622,8 @@ def _cards_section_html(
     filters cards by ``offsetParent``, so a closed-by-default group's cards
     would silently vanish from prev/next stepping and the counter. Each card
     keeps ``id="change-{original index}"`` — the sidebar hrefs link by
-    change-order index, so grouping may reorder the DOM but never renumber. Sibling groups follow v2 document order when
-    ``order_map`` is given. Changes without a node_path trail in flat
+    change-order index, so grouping may reorder the DOM but never renumber. Sibling
+    groups follow the later version's document order. Changes without a node_path trail in flat
     ``group_label`` groups, then removed changes in their own section
     (``_removed_cards_html``). Only when NO change has a node_path and nothing was
     removed does the section render flat: a removal always goes in the removed
@@ -657,7 +633,9 @@ def _cards_section_html(
     A later-version group whose label path exactly matches removals' earlier
     parent path carries a pointer to that heading in the removed section
     (``_removed_pointers``). The pointer is looked up after the removed section is
-    built and only rendered.
+    built and only rendered. ``later_paths`` counts each label path over the whole
+    later tree (``_label_path_counts``); without it, the groups that have changes are
+    counted instead.
     """
     if not view.changes:
         return '<p class="no-changes">No changes found between these versions.</p>'
@@ -666,29 +644,45 @@ def _cards_section_html(
     root, fallback = _group_changes_by_node(view)
     removed_section, removed_ids = _removed_cards_html(view, removed_order)
     pointers = _removed_pointers(view)
+    # A pointer names a heading by its labels. Where two later headings share a label
+    # path, either could be meant and both would claim the same removals, so neither
+    # carries one, as a label collision never does. A heading with no changes under it
+    # still counts, so the count is over the later tree when there is one (#816).
+    shared: dict[tuple[str, ...], int] = dict(later_paths or {})
 
-    def render(seg: tuple[str, str], node: dict, path: tuple) -> str:
-        label, _level = seg
-        p = path + (seg,)
-        labels = tuple(lbl for lbl, _lvl in p)
-        pointer = _pointer_html(pointers[labels], removed_ids[labels]) if labels in pointers else ""
+    def count(node: dict, labels: tuple[str, ...]) -> None:
+        for (_id, label, _level), child in node["children"].items():
+            shared[(*labels, label)] = shared.get((*labels, label), 0) + 1
+            count(child, (*labels, label))
+
+    if not later_paths:
+        count(root, ())
+
+    def render(seg: tuple[str, str, str], node: dict, labels: tuple[str, ...]) -> str:
+        _id, label, _level = seg
+        labels = (*labels, label)
+        unique = shared.get(labels) == 1
+        pointer = _pointer_html(pointers[labels], removed_ids[labels]) if labels in pointers and unique else ""
         cards = "\n".join(_build_card(view.changes[i], i) for i in node["items"])
-        kids = "\n".join(render(s, c, p) for s, c in _ordered_children(node, p, order_map))
-        return _card_group_html(label, "\n".join(part for part in (pointer, cards, kids) if part))
+        kids = "\n".join(render(s, c, labels) for s, c in _in_tree_order(node, view.node_order))
+        return _card_group_html(label, "\n".join(part for part in (pointer, cards, kids) if part), node_id=seg[0])
 
-    blocks = [render(seg, node, ()) for seg, node in _ordered_children(root, (), order_map)]
+    blocks = [render(seg, node, ()) for seg, node in _in_tree_order(root, view.node_order)]
     for label in _fallback_labels(fallback):
         cards = "\n".join(_build_card(view.changes[i], i) for i in fallback[label])
-        blocks.append(_card_group_html(label, cards))
+        blocks.append(_card_group_html(_fallback_heading(label, root), cards))
     if removed_section:
         blocks.append(removed_section)
     return "\n".join(blocks)
 
 
-def _card_group_html(label: str, inner: str, extra_class: str = "", group_id: str = "") -> str:
+def _card_group_html(label: str, inner: str, extra_class: str = "", group_id: str = "", node_id: str = "") -> str:
+    """One card group. ``node_id`` is the tree node a later-version group stands for, as
+    ``data-node``, so the group's identity is in the page and not only its label."""
     id_attr = f' id="{group_id}"' if group_id else ""
+    node_attr = f' data-node="{escape(node_id, quote=True)}"' if node_id else ""
     return (
-        f'<details class="change-group{extra_class}"{id_attr} open>'
+        f'<details class="change-group{extra_class}"{id_attr}{node_attr} open>'
         f'<summary class="change-group__label disclosure">{escape(label)}</summary>\n{inner}\n</details>'
     )
 
@@ -732,8 +726,8 @@ def _has_full_bill(canonical: dict | None) -> bool:
 def _full_text_is_guttered(canonical: dict) -> bool:
     """Whether full_text is ``numbered_lines`` (see schema/canonical-diff.md).
 
-    Read from the document's ``full_text_layout``. A 3.0 document predates the field,
-    and only for it is the layout taken from the v2 source.
+    Read from the document's ``full_text_layout``. The field is optional, and only for
+    a document without it is the layout taken from the v2 source.
     """
     layout = canonical.get("full_text_layout")
     if layout is not None:
@@ -748,9 +742,9 @@ def _view_toggle_html(canonical: dict | None) -> str:
         return ""
     return (
         '<div class="view-toggle" role="tablist" aria-label="View mode">'
-        '<button class="view-toggle__btn is-active" data-view="changes" role="tab"'
+        '<button class="button button--segment is-active" data-view="changes" role="tab"'
         ' aria-selected="true">Changes</button>'
-        '<button class="view-toggle__btn" data-view="full" role="tab"'
+        '<button class="button button--segment" data-view="full" role="tab"'
         ' aria-selected="false">Full bill</button>'
         "</div>"
     )
@@ -759,7 +753,7 @@ def _view_toggle_html(canonical: dict | None) -> str:
 def _move_note(change: dict) -> str:
     """Tooltip text for a moved span: a relocation note, with renumbering if known."""
     move = change.get("move") or {}
-    if move.get("kind") == "renumbered":
+    if move.get("kind") in ("renumbered", "relocated_and_renumbered"):
         return (
             f"moved here (renumbered {escape(str(move.get('old_label', '')))}"
             f" → {escape(str(move.get('new_label', '')))})"
@@ -978,9 +972,8 @@ def _full_bill_html(canonical: dict, joins: dict[int, bool] | None = None) -> st
     # navigation, so heading rows need no ids.
     tree_v2 = (canonical.get("tree") or {}).get("v2") if canonical.get("tree") else None
     row_ids: dict[int, str] = {}
-    lines = _WholeLines(v2_text)
     for node in _walk_tree(tree_v2 or []):
-        off = _node_anchor_offset(v2_text, node, lines)
+        off = _node_anchor_offset(v2_text, node)
         if off is not None:
             row_ids.setdefault(off, f"fb-off-{off}")
 
@@ -1028,19 +1021,17 @@ def _full_bill_html(canonical: dict, joins: dict[int, bool] | None = None) -> st
 def _views_html(
     view: DiffView,
     canonical: dict | None,
-    order_map: dict[tuple, int] | None = None,
     removed_order: dict[tuple[str, ...], int] | None = None,
 ) -> str:
     """Main content: classic cards, or the toggled changes/full-text pair.
 
     The full-text view renders the document laid out as printed (`printed_document`).
     """
-    if order_map is None:
-        order_map = _node_order_map((canonical.get("tree") or {}).get("v2") if canonical else None)
     if removed_order is None:
         removed_order = _removed_order_map(((canonical or {}).get("tree") or {}).get("v1"))
+    later_paths = _label_path_counts(((canonical or {}).get("tree") or {}).get("v2"))
     changes_inner = (
-        f"<h2>Changes</h2>\n{_cards_section_html(view, order_map, removed_order)}"
+        f"<h2>Changes</h2>\n{_cards_section_html(view, removed_order, later_paths)}"
         '\n<p class="filter-empty" id="filter-empty" hidden>No changes match this filter.</p>'
     )
     if not _has_full_bill(canonical):
@@ -1083,7 +1074,7 @@ def _export_button_html(canonical: dict | None) -> str:
     pipeline that supplies it — XML and PDF alike, not PDF-only."""
     if not _has_full_bill(canonical):
         return ""
-    return '<button id="export-open" class="export-btn" type="button">Export and share</button>'
+    return '<button id="export-open" class="button button--primary" type="button">Export and share</button>'
 
 
 def _nav_controls_html(canonical: dict | None) -> str:
@@ -1096,9 +1087,9 @@ def _nav_controls_html(canonical: dict | None) -> str:
         return ""
     return (
         '<div class="nav-controls" role="group" aria-label="Navigate changes">'
-        '<button id="btn-prev" type="button" aria-label="Previous change" disabled>&larr;</button>'
+        '<button id="btn-prev" class="button" type="button" aria-label="Previous change" disabled>&larr;</button>'
         '<span id="nav-counter" class="nav-counter" aria-live="polite">0 / 0</span>'
-        '<button id="btn-next" type="button" aria-label="Next change">&rarr;</button>'
+        '<button id="btn-next" class="button" type="button" aria-label="Next change">&rarr;</button>'
         "</div>"
     )
 
@@ -1114,8 +1105,8 @@ def _find_bar_html(canonical: dict | None) -> str:
         '<div class="find-bar" role="search">'
         '<input id="find-input" type="search" placeholder="Find in view…" aria-label="Find in view">'
         '<span id="find-counter" class="find-counter" aria-live="polite">0 / 0</span>'
-        '<button id="find-prev" type="button" aria-label="Previous match" disabled>&uarr;</button>'
-        '<button id="find-next" type="button" aria-label="Next match" disabled>&darr;</button>'
+        '<button id="find-prev" class="button" type="button" aria-label="Previous match" disabled>&uarr;</button>'
+        '<button id="find-next" class="button" type="button" aria-label="Next match" disabled>&darr;</button>'
         "</div>"
     )
 
@@ -1130,7 +1121,7 @@ def _export_modal_html(canonical: dict | None) -> str:
         return ""
     prompts = "".join(
         f'<li class="prompt-item">'
-        f'<button class="prompt-copy" type="button">Copy</button>'
+        f'<button class="button button--small" type="button">Copy</button>'
         f'<span class="prompt-text">{escape(p)}</span></li>'
         for p in _LLM_PROMPTS
     )
@@ -1142,8 +1133,8 @@ def _export_modal_html(canonical: dict | None) -> str:
         "<h2>Export this comparison</h2>"
         '<p class="export-modal__lead">Download the data, then ask an AI assistant to explain it.</p>'
         '<div class="export-downloads">'
-        '<button id="dl-json" class="export-dl" type="button">Download diff.json</button>'
-        '<button id="dl-html" class="export-dl" type="button">Download report.html</button>'
+        '<button id="dl-json" class="button button--primary" type="button">Download diff.json</button>'
+        '<button id="dl-html" class="button button--primary" type="button">Download report.html</button>'
         "</div>"
         '<div id="export-prompts" class="export-prompts">'
         "<h3>Ask AI</h3>"
@@ -1187,13 +1178,12 @@ def format_diff_html(
     # in-report features would not touch the payload without it) and silently strips
     # the document from every report built from a canonical that carries no full text.
     data_script = _embed_canonical(canonical)
-    # One order map for both panes, from the join's canonical — guarantees the
-    # sidebar and cards can never sort their shared groups from different trees.
-    order_map = _node_order_map((canonical.get("tree") or {}).get("v2"))
+    # One removed-section order for both panes, from the document's earlier tree, so
+    # the sidebar and cards can never sort their shared groups differently.
     removed_order = _removed_order_map((canonical.get("tree") or {}).get("v1"))
     # The TOC's anchors index the text the full-bill view renders, so it reads the
     # same printed layout.
-    sidebar = _build_sidebar(view, printed_document(canonical)[0], order_map, removed_order)
+    sidebar = _build_sidebar(view, printed_document(canonical)[0], removed_order)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1224,7 +1214,7 @@ def format_diff_html(
 {_export_button_html(canonical)}
 </div>
 </div>
-{_views_html(view, canonical, order_map, removed_order)}
+{_views_html(view, canonical, removed_order)}
 </div>
 </div>
 {_export_modal_html(canonical)}
@@ -1243,25 +1233,28 @@ def format_diff_html(
 # applied, so both pipelines share one stylesheet.
 # ---------------------------------------------------------------------------
 
-# The palette is `styles/tokens.css`, read by `deltatrack.palette`. Every report embeds it at render
-# time, which is what keeps a report zero-egress (ADR 0011): nothing is fetched when one
-# is opened. Gated by `test_the_report_palette_declares_exactly_what_it_uses`, which
-# reads a rendered report and fails on a token this stylesheet does not use.
-_DESIGN_TOKENS_CSS = root_block()
-
 #: The report's rule files, in cascade order. Read from the package and embedded rather
 #: than linked, for the same reason as the palette: a report carries its whole stylesheet.
-_STYLESHEETS = ("base.css", "report.css")
+#: `components.css` holds the button and badge rules the upload pages share (#774); the
+#: report's own rules come after it, so they can place a control.
+_STYLESHEETS = ("base.css", "components.css", "report.css")
 
-_CSS = _DESIGN_TOKENS_CSS + "".join(
-    files("deltatrack").joinpath("styles", name).read_text(encoding="utf-8") for name in _STYLESHEETS
-)
+_RULES_CSS = "".join(files("deltatrack").joinpath("styles", name).read_text(encoding="utf-8") for name in _STYLESHEETS)
+
+# The palette is `styles/tokens.css`, read by `deltatrack.palette`. Every report embeds
+# the tokens its rules use at render time, which is what keeps a report zero-egress (ADR
+# 0011): nothing is fetched when one is opened. Only those tokens, because the file also
+# holds tokens other surfaces need. Gated by
+# `test_the_report_palette_declares_exactly_what_it_uses`, which reads a rendered report.
+_DESIGN_TOKENS_CSS = root_block(referenced(_RULES_CSS))
+
+_CSS = _DESIGN_TOKENS_CSS + _RULES_CSS
 
 
 _JS = """\
 document.addEventListener('DOMContentLoaded', function() {
   // View toggle (Changes / Full bill)
-  var toggleBtns = document.querySelectorAll('.view-toggle__btn');
+  var toggleBtns = document.querySelectorAll('.view-toggle [data-view]');
   var sidebarChanges = document.querySelector('.sidebar-changes');
   var sidebarToc = document.querySelector('.sidebar-tree');
   function showView(name) {
@@ -1331,7 +1324,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
   // Prompt copy buttons
-  document.querySelectorAll('.prompt-copy').forEach(function(btn) {
+  document.querySelectorAll('.prompt-item .button').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var text = btn.parentElement.querySelector('.prompt-text').textContent;
       navigator.clipboard.writeText(text).then(function() {

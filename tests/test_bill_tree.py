@@ -10,11 +10,13 @@ from deltatrack.bill_tree import (
     _extract_appropriations_text,
     _extract_metadata,
     _extract_section_text,
+    _walk_one_body,
     amount_text,
     build_division_label,
     build_title_label,
     extract_display_text,
     extract_text_content,
+    find_bill_bodies,
     find_bill_body,
     get_header_text,
     normalize_bill,
@@ -323,6 +325,59 @@ class TestExtractTextContent:
         el = ET.fromstring("<paragraph><enum>(1)</enum><text>None of the funds.</text></paragraph>")
         assert extract_text_content(el) == "(1)None of the funds."
 
+    @pytest.mark.parametrize(
+        "pretty",
+        [
+            "<paragraph><enum>(1)</enum> <text>paragraph 2 of article 16.7</text></paragraph>",
+            "<paragraph><enum>(1)</enum>\n\t\t\t\t<text>paragraph 2 of article 16.7</text></paragraph>",
+            "<paragraph><enum>(1) </enum><text>paragraph 2 of article 16.7</text></paragraph>",
+            "<paragraph><enum>(1)</enum><text> paragraph 2 of article 16.7</text></paragraph>",
+            "<paragraph> <enum>(1)</enum> <text> <quote>paragraph 2</quote> of article 16.7</text></paragraph>",
+        ],
+        ids=["enum-tail-space", "enum-tail-newline", "inside-enum", "start-of-text", "nested-quote"],
+    )
+    def test_whitespace_after_enum_marker_dropped(self, pretty):
+        # #456: one version puts whitespace after the marker element, the other doesn't.
+        # The two say the same thing, so they must extract the same, or the section reads
+        # as modified. Shapes from the corpus: the enum's tail (114-hr-2029 v6 -> v7, Sec.
+        # 519), inside the enum (v3 -> v4, "<enum>(3) </enum>"), and the start of the next
+        # element (v6, "<text> <quote>Working Capital Fund").
+        compact = ET.fromstring("<paragraph><enum>(1)</enum><text>paragraph 2 of article 16.7</text></paragraph>")
+        assert extract_text_content(compact) == "(1)paragraph 2 of article 16.7"
+        assert extract_text_content(ET.fromstring(pretty)) == extract_text_content(compact)
+
+    def test_pretty_printed_gap_before_header_dropped(self):
+        el = ET.fromstring(
+            "<subsection><enum>(a)</enum> <header>In general</header><text>The Secretary.</text></subsection>"
+        )
+        assert extract_text_content(el) == "(a)In general The Secretary."
+
+    def test_pretty_printed_gap_after_numbered_enum_keeps_one_space(self):
+        # A section number is not an attaching marker, so it keeps its separator
+        # either way: pretty and compact both read "701. Military".
+        pretty = ET.fromstring("<section><enum>701.</enum> <header>Military</header></section>")
+        compact = ET.fromstring("<section><enum>701.</enum><header>Military</header></section>")
+        assert extract_text_content(pretty) == extract_text_content(compact) == "701. Military"
+
+    def test_citation_followed_by_word_keeps_its_space(self):
+        # The fix is keyed on the <enum> element, not on the "(b)" pattern, so a citation
+        # in prose keeps the space after it (the regex-widening alternative in #456 welded
+        # these: "403(b)grandfathered").
+        el = ET.fromstring("<text>section 403(b) grandfathered plans</text>")
+        assert extract_text_content(el) == "section 403(b) grandfathered plans"
+
+    def test_a_line_break_after_the_marker_ends_the_attachment(self):
+        # The break is a space of its own, so the text after it is not the marker's: an
+        # inline element there keeps its leading space ("x foo", not "xfoo").
+        el = ET.fromstring("<paragraph><enum>(1)</enum><linebreak/>x<term> foo</term></paragraph>")
+        assert extract_text_content(el) == "(1) x foo"
+
+    def test_enum_tail_with_words_keeps_the_words(self):
+        # A tail carrying words is text: only its leading space goes, and the element
+        # after it is not stripped, since the marker no longer precedes it.
+        el = ET.fromstring("<text>Suicidology.(b) <enum>(1)</enum> None of<quote> the funds</quote></text>")
+        assert extract_text_content(el) == "Suicidology.(b)(1)None of the funds"
+
     def test_punctuation_starting_block_not_pushed_off_anchor(self):
         # A block whose text starts with punctuation does not get a leading
         # space ("(1)." stays "(1).", not "(1) ." or "(1). .").
@@ -570,6 +625,40 @@ class TestFindBillBody:
             pytest.skip("Bill XML not available locally")
         tree = normalize_bill(xml_path)
         assert len(tree.nodes) >= 5
+
+    def test_every_amendment_block_is_a_body(self):
+        """An engrossed amendment can carry several amendments, each inserting its own
+        text. Every block is read, in document order, and a block wrapping a
+        <legis-body> is read as that body (#836)."""
+        root = ET.fromstring(
+            '<amendment-doc amend-type="engrossed-amendment">'
+            "<engrossed-amendment-body>"
+            "<amendment><amendment-instruction><text>(1) Insert:</text></amendment-instruction>"
+            '<amendment-block><section id="A"><text>First.</text></section></amendment-block></amendment>'
+            "<amendment><amendment-instruction><text>(2) At the end, insert:</text></amendment-instruction>"
+            '<amendment-block><legis-body><section id="B"><text>Second.</text></section></legis-body>'
+            "</amendment-block></amendment>"
+            "</engrossed-amendment-body>"
+            "</amendment-doc>"
+        )
+        bodies = find_bill_bodies(root)
+        assert [b.tag for b in bodies] == ["amendment-block", "legis-body"]
+        assert [b.find("section").get("id") for b in bodies] == ["A", "B"]
+        assert find_bill_body(root) is bodies[0], "find_bill_body still names the first"
+
+    def test_114_hr_2029_v6_reads_its_second_amendment(self):
+        """v6's second amendment appends Division Q (the PATH Act, 135 sections) at the end
+        of its first; it used to be dropped, so v6 -> v7 called the division added (#836)."""
+        xml_path = fixture_path("114-hr-2029", "6_engrossed-amendment-house.xml")
+        second = ET.parse(xml_path).getroot().findall(".//engrossed-amendment-body/amendment/amendment-block")[1]
+        # A section quoted inside another's amendment ("139F." of the Internal Revenue
+        # Code) is that section's text, not a node, here as in the first block.
+        quoted = {s.get("id") for q in second.iter("quoted-block") for s in q.iter("section")}
+        own = {s.get("id") for s in second.iter("section")} - quoted
+        nodes = [n for n in normalize_bill(xml_path).nodes if n.element_id in own]
+        assert (len(own), len(quoted)) == (128, 7)
+        assert {n.element_id for n in nodes} == own
+        assert {n.body_index for n in nodes} == {1}
 
     def test_missing_body_raises(self):
         root = ET.fromstring("<bill><metadata/></bill>")
@@ -1175,6 +1264,109 @@ class TestWalkTitle:
         assert nodes[1].match_path == ("dept", "tax provisions", "sec. 101")
         # Third node: should be back under Agency A, not Tax Provisions
         assert nodes[2].match_path == ("dept", "agency a", "another sub agency")
+
+
+class TestAmendmentOpeningClause:
+    """An amendment block whose replacement text opens with its enacting clause as
+    section-level continuation text reads it as an undesignated section (#826)."""
+
+    _CLAUSE = "That the following sums are appropriated, out of any money in the Treasury, namely:"
+
+    def _block(self, opening: str) -> ET.Element:
+        return ET.fromstring(
+            f'<amendment-block style="appropriations">{opening}'
+            '<title id="T1"><enum>I</enum><header>Department of defense</header>'
+            '<section id="S2"><enum>101.</enum><text>None of the funds.</text></section></title>'
+            "</amendment-block>"
+        )
+
+    def test_the_opening_clause_is_the_first_node(self):
+        block = self._block(f' <continuation-text continuation-text-level="section">{self._CLAUSE}</continuation-text>')
+        first, *rest = _walk_one_body(block)
+        assert (first.tag, first.match_path, first.display_path, first.section_number) == ("section", (), (), "")
+        assert first.body_text == self._CLAUSE
+        assert first.display_text == self._CLAUSE
+        assert [n.section_number for n in rest] == ["Sec. 101"]
+
+    def test_it_reads_as_the_same_clause_does_as_an_undesignated_section(self):
+        """114-hr-2029 v4 prints the clause as <section id="S1">; v5 as continuation text.
+        The two nodes must agree on everything the matcher reads, or the clause shows as
+        removed and added."""
+        block = self._block(f'<continuation-text continuation-text-level="section">{self._CLAUSE}</continuation-text>')
+        section = ET.fromstring(f'<legis-body><section id="S1"><text>{self._CLAUSE}</text></section></legis-body>')
+        (as_text,) = _walk_one_body(block)[:1]
+        (as_section,) = walk_body_sections(section)
+        for field in ("tag", "match_path", "display_path", "header_text", "body_text", "section_number"):
+            assert getattr(as_text, field) == getattr(as_section, field), field
+
+    @pytest.mark.parametrize(
+        "opening",
+        [
+            "",
+            '<continuation-text continuation-text-level="paragraph">That the sums.</continuation-text>',
+            '<continuation-text continuation-text-level="section"> </continuation-text>',
+            '<text continuation-text-level="section">That the sums.</text>',
+        ],
+        ids=["no-continuation-text", "not-section-level", "empty", "another-element-with-the-attribute"],
+    )
+    def test_nothing_else_becomes_a_node(self, opening):
+        nodes = _walk_one_body(self._block(opening))
+        assert [n.section_number for n in nodes] == ["Sec. 101"]
+
+    def test_continuation_text_after_the_first_element_is_left_alone(self):
+        """Only the clause that opens the block is its enacting clause."""
+        block = ET.fromstring(
+            '<amendment-block><section id="S2"><enum>101.</enum><text>None of the funds.</text></section>'
+            '<continuation-text continuation-text-level="section">That the sums.</continuation-text>'
+            "</amendment-block>"
+        )
+        assert [n.section_number for n in _walk_one_body(block)] == ["Sec. 101"]
+
+    def test_the_clause_has_an_element_id_the_full_text_can_anchor(self):
+        block = self._block(f'<continuation-text continuation-text-level="section">{self._CLAUSE}</continuation-text>')
+        assert _walk_one_body(block)[0].element_id == "amendment-opening-clause"
+
+    def test_each_blocks_opening_clause_has_its_own_id(self):
+        """Every amendment block is a body (#836); two openings sharing one id would share
+        one full-text span, so a later block's takes its body index."""
+        block = self._block(f'<continuation-text continuation-text-level="section">{self._CLAUSE}</continuation-text>')
+        ids = [_walk_one_body(block, index)[0].element_id for index in (0, 1, 2)]
+        assert ids == ["amendment-opening-clause", "amendment-opening-clause-1", "amendment-opening-clause-2"]
+
+    def test_a_document_with_two_opening_clauses_reads_both_with_distinct_ids(self, tmp_path):
+        clause = '<continuation-text continuation-text-level="section">{}</continuation-text>'
+        xml = (
+            '<amendment-doc amend-type="engrossed-amendment"><engrossed-amendment-body>'
+            "<amendment><amendment-block>"
+            + clause.format(self._CLAUSE)
+            + '<section id="S2"><enum>101.</enum><text>None of the funds.</text></section>'
+            "</amendment-block></amendment>"
+            "<amendment><amendment-block>"
+            + clause.format("Provided further, the following shall apply.")
+            + '<section id="S3"><enum>201.</enum><text>Some of the funds.</text></section>'
+            "</amendment-block></amendment>"
+            "</engrossed-amendment-body></amendment-doc>"
+        )
+        path = tmp_path / "5_engrossed-amendment-senate.xml"
+        path.write_text(xml)
+        clauses = [n for n in normalize_bill(path).nodes if n.element_id.startswith("amendment-opening-clause")]
+        assert [(n.element_id, n.body_index) for n in clauses] == [
+            ("amendment-opening-clause", 0),
+            ("amendment-opening-clause-1", 1),
+        ]
+
+    def test_continuation_text_outside_an_amendment_block_is_left_alone(self):
+        body = ET.fromstring(
+            '<legis-body><continuation-text continuation-text-level="section">That.</continuation-text>'
+            '<section id="S2"><enum>101.</enum><text>None of the funds.</text></section></legis-body>'
+        )
+        assert [n.section_number for n in _walk_one_body(body)] == ["Sec. 101"]
+
+    def test_114_hr_2029_v5_has_its_clause(self):
+        tree = normalize_bill(fixture_path("114-hr-2029", "5_engrossed-amendment-senate.xml"))
+        first = tree.nodes[0]
+        assert first.body_text.startswith("That the following sums are appropriated, out of any money")
+        assert first.match_path == ()
 
 
 class TestWalkBodySections:
@@ -1980,8 +2172,30 @@ class TestSubsectionNodes:
         nodes = walk_title(title, "TITLE V—GENERAL PROVISIONS", NO_DIVISION)
         subs = [n for n in nodes if n.tag == "subsection"]
         assert len(subs) == 3
-        assert subs[0].display_path == ("TITLE V—GENERAL PROVISIONS", "sec. 547", "(a) In general")
+        assert subs[0].display_path == ("TITLE V—GENERAL PROVISIONS", "Sec. 547", "(a) In general")
         assert subs[0].match_path == ("general provisions", "sec. 547", "(a) in general")
+
+    def test_an_appropriations_section_displays_as_sec_n_inside_a_title(self):
+        """The other in-title branch: a section with its own text and accounts below it."""
+        title = ET.fromstring(
+            "<title><enum>I</enum><header>GENERAL PROVISIONS</header>"
+            '<section id="S101"><enum>101.</enum><text>Amounts in this section are available.</text>'
+            "<appropriations-intermediate><header>Salaries</header><text>For salaries, $5.</text>"
+            "</appropriations-intermediate></section></title>"
+        )
+        section = next(n for n in walk_title(title, "TITLE I—GENERAL PROVISIONS", NO_DIVISION) if n.tag == "section")
+        assert section.display_path[-1] == "Sec. 101"
+        assert section.match_path[-1] == "sec. 101"
+
+    def test_a_section_displays_as_sec_n_inside_a_title_or_out(self):
+        """One display form wherever the section sits (#810); matching keeps its key."""
+        title = ET.fromstring(
+            "<title><enum>V</enum><header>GENERAL PROVISIONS</header>" + _SEC547_SUBS_XML + "</title>"
+        )
+        in_title = next(n for n in walk_title(title, "TITLE V—GENERAL PROVISIONS", NO_DIVISION) if n.tag == "section")
+        at_body = next(n for n in walk_body_sections(_body_with(_SEC547_SUBS_XML)) if n.tag == "section")
+        assert in_title.display_path[-1] == at_body.display_path[-1] == "Sec. 547"
+        assert in_title.match_path[-1] == at_body.match_path[-1] == "sec. 547"
 
 
 class TestSubsectionLabelBounds:
@@ -2586,3 +2800,19 @@ class TestUntitledBillAppropriations:
         tree = self._tree("4_enrolled-bill.xml")
         leaves = {n.match_path[-1] for n in tree.nodes if n.match_path}
         assert {"compensation and pensions", "readjustment benefits"} <= leaves
+
+
+@pytest.mark.slow
+def test_every_committed_section_is_labelled_sec_n():
+    """One display form for a section, on every committed XML version (#810): its label is
+    its section number, and no display segment is the lowercased match key."""
+    files = sorted((PROJECT_ROOT / "tests" / "corpus").glob("*/*.xml"))
+    assert len(files) > 40
+    checked = 0
+    for path in files:
+        for node in normalize_bill(path).nodes:
+            assert not [seg for seg in node.display_path if seg.startswith("sec. ")], (path.name, node.display_path)
+            if node.tag == "section" and node.section_number and node.display_path:
+                assert node.display_path[-1] == node.section_number, (path.name, node.display_path)
+                checked += 1
+    assert checked > 10_000

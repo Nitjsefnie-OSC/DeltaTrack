@@ -116,7 +116,8 @@ def find_bill_body(root: ET.Element) -> ET.Element:
     """Find the effective body element from a bill, resolution or amendment-doc root.
 
     Returns legis-body for bills, resolution-body for resolutions, or
-    amendment-block for amendment-docs.
+    the first amendment block (or the ``<legis-body>`` it wraps) for amendment-docs;
+    ``find_bill_bodies`` returns every one.
     Raises ValueError if no body can be found, or if the document carries paired
     committee-amendment variants we cannot choose between (see below).
     """
@@ -146,12 +147,21 @@ def find_bill_body(root: ET.Element) -> ET.Element:
         return resolution_bodies[0]
 
     # Amendment doc: <amendment-doc><engrossed-amendment-body><amendment><amendment-block>
-    block = root.find(".//engrossed-amendment-body/amendment/amendment-block")
-    if block is not None:
-        nested = block.find("legis-body")
-        return nested if nested is not None else block
+    blocks = _amendment_bodies(root)
+    if blocks:
+        return blocks[0]
 
     raise ValueError("Could not find bill body in XML")
+
+
+def _amendment_bodies(root: ET.Element) -> list[ET.Element]:
+    """Each amendment's inserted text, in document order: its block, or the
+    ``<legis-body>`` the block wraps."""
+    bodies = []
+    for block in root.findall(".//engrossed-amendment-body/amendment/amendment-block"):
+        nested = block.find("legis-body")
+        bodies.append(nested if nested is not None else block)
+    return bodies
 
 
 def find_bill_bodies(root: ET.Element) -> list[ET.Element]:
@@ -182,12 +192,34 @@ def find_bill_bodies(root: ET.Element) -> list[ET.Element]:
     Which of two alternative texts is authoritative, and how to mark where the second
     begins, is #186's question. This function only guarantees no text is dropped.
 
-    Falls back to ``find_bill_body`` for the resolution and amendment-doc shapes, which
-    are single-body (and, for paired resolution variants, still fail loudly per #427).
+    An engrossed amendment can carry several amendments, each inserting its own text
+    ("(2) At the end of House amendment numbered 1, insert the following:"). Every
+    amendment block is a body, in document order, for the same reason: taking the first
+    dropped the rest (#836; 114-hr-2029 v6 lost Division Q, 128 sections of its own).
+    Each block is read as text following the one before it; its instruction is not
+    interpreted. That is right where the blocks are consecutive pieces of one inserted
+    text: "In lieu of … insert" or "Strike all … and insert", continued by blocks whose
+    instruction is blank (117-hr-2471 v5, 115-hr-244 v5), "At the end of … insert", and
+    partial strikes that together replace every section in order. It is not right where
+    the blocks are edits to scattered parts of a larger text ("Strike section 5 and
+    insert…", page-and-line amendments): an engrossed amendment carries only the
+    replacements, so the version reads as those fragments and a comparison treats them as
+    the whole bill. That was as wrong when only the first block was read.
+
+    Only a block's sections and the levels above them become nodes, so a block that holds
+    a fragment below section level (a subsection, a paragraph, a lone quoted block) or a
+    preamble still reaches no node. Measured over the 113th-119th Congresses' 449
+    engrossed amendments (2026-10-11, on PR #837).
+
+    Falls back to ``find_bill_body`` for the resolution shape, which is single-body (and,
+    for paired resolution variants, still fails loudly per #427).
     """
     bodies = root.findall("legis-body")
     if bodies:
         return bodies
+    blocks = _amendment_bodies(root)
+    if blocks:
+        return blocks
     return [find_bill_body(root)]
 
 
@@ -265,12 +297,15 @@ def _itertext_block_spaced(element: ET.Element) -> str:
 
     Empty break elements (``_BREAK_TAGS``) are emitted as a space.
 
-    The result only ever *adds* spaces; it never removes or reorders text.
+    The one thing it removes is whitespace right after a parenthetical ``enum``
+    (#456), so a pretty-printed version and a compact one extract the same. Otherwise
+    it only ever *adds* spaces; it never removes or reorders text.
     """
     parts: list[str] = []
     if element.text:
         parts.append(element.text)
     prev_paren_enum = False
+    attach_next = False
     for child in element:
         if child.tag in _BREAK_TAGS:
             # Emit the break as whitespace; the final split()/join collapses any
@@ -278,9 +313,11 @@ def _itertext_block_spaced(element: ET.Element) -> str:
             parts.append(" ")
             if child.tail:
                 parts.append(child.tail)
-            prev_paren_enum = False
+            prev_paren_enum = attach_next = False
             continue
         child_text = _itertext_block_spaced(child)
+        if attach_next:
+            child_text = child_text.lstrip()
         if (
             child.tag in _BLOCK_TAGS
             and not prev_paren_enum
@@ -290,12 +327,23 @@ def _itertext_block_spaced(element: ET.Element) -> str:
             and child_text[:1].isalnum()
         ):
             parts.append(" ")
-        parts.append(child_text)
-        if child.tail:
-            parts.append(child.tail)
         # A parenthetical enum like "(c)" attaches to the following text; a
         # number/roman enum like "701." or "I" does not.
         prev_paren_enum = child.tag == "enum" and child_text.lstrip()[:1] == "("
+        tail = child.tail or ""
+        if prev_paren_enum:
+            child_text = child_text.rstrip()
+            tail = tail.lstrip()
+        parts.append(child_text)
+        # Whitespace between an attaching enum and what follows it is layout, in the
+        # three places the corpus puts it: inside the marker ("<enum>(3) </enum>"), in its
+        # tail ("<enum>(1)</enum> <text>"), and at the start of the next element
+        # ("<enum>(1)</enum><text> <quote>"). All read "(1)paragraph", as the compact
+        # source does (#456). Anything between the marker and its text ends this,
+        # including an empty element: "<enum>(1)</enum><text/> <text>" keeps its space.
+        attach_next = prev_paren_enum and not tail
+        if tail:
+            parts.append(tail)
     return "".join(parts)
 
 
@@ -623,17 +671,31 @@ _CONGRESS_WORDS = {
 _LEGIS_NUM_RE = re.compile(r"([A-Z][A-Z.\s]*?)\s*(\d+)")
 
 
+def _section_label(section: ET.Element) -> str:
+    """A section's display label, "Sec. 101", wherever it sits (#810); "" with no number.
+    Its match key is this lowercased; the display keeps the number as printed."""
+    enum_el = section.find("enum")
+    if enum_el is None or not enum_el.text:
+        return ""
+    return f"Sec. {enum_el.text.strip().rstrip('.')}"
+
+
 def _build_paths(
     title_display: str,
     division_label: str,
     major: str | None,
     intermediate: str | None,
     leaf_header: str | None,
+    leaf_display: str | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Build match_path and display_path tuples.
 
     match_path: normalized, no division. Used for cross-version matching.
     display_path: original case, includes division. Used for human display.
+
+    ``leaf_display`` is the leaf's display form when it differs from its match form: a
+    section matches on ``sec. 101`` and displays as ``Sec. 101``, the form a section outside
+    any title already displays as (#810).
 
     ``title_display`` is the title label with its enum ("TITLE I—<header>", #50).
     Display keeps the full label; matching keys on the header alone (the enum is
@@ -661,7 +723,7 @@ def _build_paths(
 
     if leaf_header and leaf_header != major and leaf_header != intermediate:
         match_parts.append(normalize_header(leaf_header))
-        display_parts.append(leaf_header)
+        display_parts.append(leaf_display or leaf_header)
 
     return tuple(match_parts), tuple(display_parts)
 
@@ -835,13 +897,8 @@ def _walk_section_appro_children(
     account hierarchy into the section's own text and no account node was ever created
     (#485).
 
-    Only this walk is shared, not the section's own node. The two callers build that
-    node's display_path by different conventions (``walk_body_sections`` keeps the
-    section number cased as "Sec. 101", the title path lowercases it through
-    ``_build_paths``), and unifying them here would have re-cased 24,662 of the 25,191
-    plain body-level sections in the corpus to fix 7 — a cosmetic regression far wider
-    than the defect. That difference is real but separate; it is not this function's to
-    settle.
+    Only this walk is shared, not the section's own node: each caller builds that node's
+    paths itself, both displaying the section as "Sec. 101" (:func:`_section_label`, #810).
 
     Context (``current_major`` / ``current_intermediate`` / ``prev_name``) is scoped to
     the caller and not written back: the callers pass their own copies and neither wants
@@ -898,10 +955,7 @@ def _process_section_element(
     """
     has_appro_children = any(c.tag.startswith("appropriations-") for c in section)
 
-    enum_el = section.find("enum")
-    section_num = ""
-    if enum_el is not None and enum_el.text:
-        section_num = f"Sec. {enum_el.text.strip().rstrip('.')}"
+    section_num = _section_label(section)
 
     if has_appro_children:
         appro_carve = frozenset(id(c) for c in section if c.tag.startswith("appropriations-"))
@@ -914,6 +968,7 @@ def _process_section_element(
                 current_major,
                 current_intermediate,
                 sec_label,
+                leaf_display=section_num,
             )
             nodes.append(
                 BillNode(
@@ -955,6 +1010,7 @@ def _process_section_element(
                 current_major,
                 current_intermediate,
                 sec_label,
+                leaf_display=section_num,
             )
             nodes.append(
                 BillNode(
@@ -1158,11 +1214,10 @@ def _extract_section_text(section: ET.Element, exclude: frozenset[int] = frozens
     # siblings. The second pass is intentional, not redundant: it only touches the new
     # join boundaries, and _LIST_MARKER_RE is idempotent on the already-clean parts.
     #
-    # It normalizes only the space BEFORE a marker, not the one after, so two versions
-    # that differ in whether the source XML puts whitespace after an enum still read as
-    # a textual change ("(1) paragraph" vs "(1)paragraph"). That is a separate defect in
-    # this normalizer, tracked in #456; it predates #422 and is merely more visible now
-    # that the payload holding those markers reaches body_text at all.
+    # It normalizes only the space BEFORE a marker. The space AFTER an <enum> marker is
+    # dropped earlier, by _itertext_block_spaced, which knows where the marker element
+    # ends (#456). A regex here can't: widening it to the space after "(b)" also welded
+    # citations in prose ("403(b) grandfathered").
     text = _LIST_MARKER_RE.sub("", " ".join(part for part in parts if part)).strip()
     return text
 
@@ -1207,10 +1262,7 @@ def walk_body_sections(parent: ET.Element, division: Division = NO_DIVISION) -> 
         if not body_text and not sub_specs and not appro_carve:
             continue
 
-        enum_el = child.find("enum")
-        section_num = ""
-        if enum_el is not None and enum_el.text:
-            section_num = f"Sec. {enum_el.text.strip().rstrip('.')}"
+        section_num = _section_label(child)
 
         sec_label = section_num.lower() if section_num else ""
         match_path = (sec_label,) if sec_label else ()
@@ -1465,7 +1517,7 @@ def normalize_bill(xml_path: Path) -> BillTree:
     all_nodes: list[BillNode] = extract_front_matter_nodes(root, bodies[0])
 
     for index, body in enumerate(bodies):
-        body_nodes = _walk_one_body(body)
+        body_nodes = _walk_one_body(body, index)
         # Stamped here rather than threaded through the ~10 BillNode construction sites
         # in the walk, so a new site cannot silently ship without it.
         all_nodes.extend(replace(node, body_index=index) for node in body_nodes)
@@ -1473,9 +1525,59 @@ def normalize_bill(xml_path: Path) -> BillTree:
     return BillTree(congress, bill_type, bill_number, version, all_nodes, official_title)
 
 
-def _walk_one_body(body: ET.Element) -> list[BillNode]:
+AMENDMENT_OPENING_CLAUSE_ID = "amendment-opening-clause"
+
+
+def _amendment_opening_clause(body: ET.Element, body_index: int = 0) -> list[BillNode]:
+    """The section-level ``<continuation-text>`` that opens an amendment block, as a node.
+
+    An engrossed amendment that strikes all after the enacting clause inserts its
+    replacement as an ``<amendment-block>``, and that replacement can open with its own
+    enacting clause ("That the following sums are appropriated…") as continuation text
+    rather than as a ``<section>``. It is read the way the same clause reads when it is an
+    undesignated section (114-hr-2029 v4's ``<section id="S1">``): no number, no heading,
+    its text as the body. Dropping it made the report say the clause was removed (#826).
+
+    The source gives the continuation text no ``id``, so the node takes a fixed one: the
+    full text anchors a node's span by its element id, and an empty one left the clause
+    and its Front Matter group with no span. Each amendment block is a body of its own
+    (#836), so a later block's opening takes the id suffixed with its body index: two
+    nodes sharing one id would share one span.
+
+    Only the block's first element is read, and only when the body is the block itself. A
+    block that wraps a nested ``<legis-body>`` is read as that body, so an opening clause
+    before it would still be dropped; no committed bill has one.
+    """
+    first = next(iter(body), None)
+    if (
+        body.tag != "amendment-block"
+        or first is None
+        or first.tag != "continuation-text"
+        or first.attrib.get("continuation-text-level") != "section"
+    ):
+        return []
+    body_text = extract_text_content(first)
+    if not body_text:
+        return []
+    return [
+        BillNode(
+            match_path=(),
+            display_path=(),
+            tag="section",
+            element_id=first.attrib.get("id")
+            or (AMENDMENT_OPENING_CLAUSE_ID if body_index == 0 else f"{AMENDMENT_OPENING_CLAUSE_ID}-{body_index}"),
+            header_text="",
+            body_text=body_text,
+            display_text=extract_display_text(first),
+            section_number="",
+            division_label="",
+        )
+    ]
+
+
+def _walk_one_body(body: ET.Element, body_index: int = 0) -> list[BillNode]:
     """Every content node under one top-level body, in document order."""
-    all_nodes: list[BillNode] = []
+    all_nodes: list[BillNode] = _amendment_opening_clause(body, body_index)
 
     # Check for divisions first
     divisions = body.findall("division")

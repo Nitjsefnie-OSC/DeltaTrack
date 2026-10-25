@@ -4,7 +4,7 @@ Two producer functions:
   xml_diff_to_canonical(diff_dict)        -> dict
   pdf_diff_to_canonical(pdf_diff, **meta) -> dict
 
-One consumer:
+One consumer, in formatters.canonical_view (#801):
   view_from_canonical(canonical)          -> DiffView
 
 The producers are tested against the canonical JSON shape directly. The
@@ -15,6 +15,7 @@ consumer (view_from_canonical) is tested via the adapter-contract suites
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,16 +27,19 @@ import pytest
 from deltatrack.diff_pdf import PdfDiff, PdfHunk
 from deltatrack.formatters.canonical import (
     pdf_diff_to_canonical,
-    view_from_canonical,
     xml_diff_to_canonical,
 )
+from deltatrack.formatters.canonical_view import view_from_canonical
+from deltatrack.formatters.schema_version import SCHEMA_VERSION as PRODUCER_SCHEMA_VERSION
 from deltatrack.parsers.pdf_anchors import Anchor
+from tests.conftest import with_readable_text
 
-# Local pin (guard against unintended bumps). 3.1 added the optional `print_breaks`,
-# `full_text_layout` and `bill.title` (#653); 3.0 removed `amount_entries` (#671), so
-# a change object carries no money field at all; 2.0 had removed the deprecated
-# `amounts` before it (#274); 1.3 added the optional `tree` field (#108).
-SCHEMA_VERSION = "3.1"
+# Local pin (guard against unintended bumps). 3.0 removed `amount_entries` (#671), so
+# a change object carries no money field at all, and added the optional
+# `print_breaks`, `full_text_layout` and `bill.title` (#653) and node identity (#785);
+# 2.0 had removed the deprecated `amounts` before it (#274); 1.3 added the optional
+# `tree` field (#108).
+SCHEMA_VERSION = "3.0"
 
 
 # ---------- XML producer ------------------------------------------------------
@@ -54,7 +58,7 @@ def _xml_diff_dict(*, changes=None, **overrides) -> dict:
         "changes": changes or [],
     }
     base.update(overrides)
-    return base
+    return with_readable_text(base)
 
 
 def test_xml_envelope_has_versioned_metadata():
@@ -137,6 +141,7 @@ def test_xml_moved_change_emits_relocated_move():
         "old_text": "same body",
         "new_text": "same body",
         "section_number": "",
+        "move_kind": "relocated",
     }
     canonical = xml_diff_to_canonical(_xml_diff_dict(changes=[change]))
     c = canonical["changes"][0]
@@ -144,10 +149,9 @@ def test_xml_moved_change_emits_relocated_move():
     assert c["move"] == {"kind": "relocated", "body_unchanged": True}
 
 
-def test_xml_same_parent_label_change_emits_renumbered_move():
-    # #188 review fix: a subsection (or section) whose match key IS its label
-    # reconciles a rename/renumber as a move — same parent, different tail is a
-    # "renumbered" identifier change, not a relocation (mirrors _pdf_move).
+@pytest.mark.parametrize("kind", ["renumbered", "relocated_and_renumbered"])
+def test_xml_move_carries_the_differs_kind_and_labels(kind):
+    """The kind is the differ's (#807); a renumbering, relocated or not, names its labels."""
     change = {
         "change_type": "moved",
         "display_path_old": ["TITLE V", "sec. 5", "(a) In general"],
@@ -155,14 +159,26 @@ def test_xml_same_parent_label_change_emits_renumbered_move():
         "old_text": "same body",
         "new_text": "same body",
         "section_number": "Sec. 5",
+        "move_kind": kind,
     }
     canonical = xml_diff_to_canonical(_xml_diff_dict(changes=[change]))
     assert canonical["changes"][0]["move"] == {
-        "kind": "renumbered",
+        "kind": kind,
         "old_label": "(a) In general",
         "new_label": "(b) In general",
         "body_unchanged": True,
     }
+
+
+def test_a_move_without_the_differs_kind_is_refused():
+    """The producer does not decide a move's kind, so a moved change without one fails
+    loudly rather than defaulting to an answer nobody made."""
+    change = {"change_type": "moved", "display_path_old": ["A"], "display_path_new": ["B"], "section_number": ""}
+    with pytest.raises(ValueError, match="move kind"):
+        xml_diff_to_canonical(_xml_diff_dict(changes=[change]))
+    hunk = PdfHunk("moved", SEC_101, SEC_201, (1, 10, 1, 20), (5, 1, 5, 12), "same", "same")
+    with pytest.raises(ValueError, match="move kind"):
+        pdf_diff_to_canonical(PdfDiff(hunks=(hunk,), v1_anchors=(SEC_101,), v2_anchors=(SEC_201,)), **_pdf_meta())
 
 
 def test_xml_unchanged_changes_are_dropped():
@@ -443,6 +459,7 @@ def test_pdf_renumbered_move_emits_kind_and_labels():
         v2_range=(5, 1, 5, 12),
         v1_text="same body",
         v2_text="same body",
+        move_kind="renumbered",
     )
     diff = PdfDiff(hunks=(hunk,), v1_anchors=(SEC_101,), v2_anchors=(SEC_201,))
     canonical = pdf_diff_to_canonical(diff, **_pdf_meta())
@@ -465,6 +482,7 @@ def test_pdf_relocated_move_when_anchor_text_unchanged():
         v2_range=(8, 1, 8, 12),
         v1_text="same body",
         v2_text="same body",
+        move_kind="relocated",
     )
     diff = PdfDiff(hunks=(hunk,), v1_anchors=(SEC_101,), v2_anchors=(SEC_101,))
     canonical = pdf_diff_to_canonical(diff, **_pdf_meta())
@@ -532,6 +550,16 @@ def test_xml_canonical_validates_against_json_schema():
                 "old_text": "s",
                 "new_text": "s",
                 "section_number": "",
+                "move_kind": "relocated",
+            },
+            {
+                "change_type": "moved",
+                "display_path_old": ["T I", "sec. 2"],
+                "display_path_new": ["T II", "sec. 202"],
+                "old_text": "s",
+                "new_text": "s",
+                "section_number": "",
+                "move_kind": "relocated_and_renumbered",
             },
         ]
     )
@@ -587,6 +615,42 @@ def test_schema_accepts_the_unmodified_producer_output():
     jsonschema.validate(canonical, _load_schema())
 
 
+def test_schema_documents_state_the_version_the_producer_stamps():
+    """The prose spec and the JSON Schema name the version every document is stamped with.
+
+    `schema/canonical-diff.md` states the version in its title, in its Versioning
+    section's `schema_version` line, in its example document and as its newest
+    changelog entry; the JSON Schema pins the major in the `schema_version` pattern.
+    Each is hand-edited apart from `SCHEMA_VERSION`, so this ties them to it: a
+    reader of the contract must see the version a produced document carries, and a
+    doc that names a version the producer never writes is the drift #816 folded away.
+    """
+    doc = (Path(__file__).resolve().parent.parent / "schema" / "canonical-diff.md").read_text()
+
+    title = re.search(r"^# Canonical Diff JSON — v(\d+\.\d+)$", doc, re.MULTILINE)
+    assert title, "canonical-diff.md title no longer reads `# Canonical Diff JSON — vX.Y`"
+    assert title.group(1) == PRODUCER_SCHEMA_VERSION
+
+    top_level = re.search(r'^Top-level field: `schema_version: "(\d+\.\d+)"`\.$', doc, re.MULTILINE)
+    assert top_level, "canonical-diff.md no longer states `Top-level field: schema_version: ...`"
+    assert top_level.group(1) == PRODUCER_SCHEMA_VERSION
+
+    stated = re.findall(r'"?schema_version"?:\s*"(\d+\.\d+)"', doc)
+    assert len(stated) >= 2, "expected the Versioning line and the example document"
+    assert set(stated) == {PRODUCER_SCHEMA_VERSION}, f"canonical-diff.md states {sorted(set(stated))}"
+
+    changelog = doc.split("## Changelog", 1)[1]
+    newest = re.search(r"^- \*\*(\d+\.\d+)\*\*", changelog, re.MULTILINE)
+    assert newest, "canonical-diff.md changelog has no `- **X.Y**` entry"
+    assert newest.group(1) == PRODUCER_SCHEMA_VERSION
+
+    pattern = _load_schema()["properties"]["schema_version"]["pattern"]
+    major = int(PRODUCER_SCHEMA_VERSION.split(".")[0])
+    assert re.fullmatch(pattern, PRODUCER_SCHEMA_VERSION)
+    assert not re.fullmatch(pattern, f"{major - 1}.0"), "the JSON Schema accepts the previous major"
+    assert not re.fullmatch(pattern, f"{major + 1}.0"), "the JSON Schema accepts the next major"
+
+
 def test_xml_full_text_default_null():
     canonical = xml_diff_to_canonical(_xml_diff_dict())
     assert canonical["full_text"] is None
@@ -604,7 +668,9 @@ def test_pdf_full_text_default_null():
 
 def test_pdf_full_text_passes_through():
     diff = PdfDiff(hunks=(), v1_anchors=(), v2_anchors=())
-    canonical = pdf_diff_to_canonical(diff, **_pdf_meta(), full_text={"v1": "x", "v2": "y"})
+    canonical = pdf_diff_to_canonical(
+        diff, **_pdf_meta(), full_text={"v1": "x", "v2": "y"}, line_offsets={"v1": {}, "v2": {}}
+    )
     assert canonical["full_text"] == {"v1": "x", "v2": "y"}
 
 
@@ -709,7 +775,7 @@ def test_xml_full_text_span_resolved_structurally_by_element_id():
     assert span["v2"] == {"start": 9, "end": 20}
 
 
-# ---------- #76: cards show the readable full_text slice ----------------------
+# ---------- #810: the document's text is the readable text ------------------
 
 
 def _modified_change_with_id(**overrides) -> dict:
@@ -761,93 +827,27 @@ def test_reader_accepts_a_current_document():
     assert view_from_canonical(canonical).changes[0].old_text
 
 
-def test_card_prefers_readable_full_text_slice():
-    """A modified card shows the readable slice (`(a) The old`), not the collapsed body."""
+def test_xml_text_is_the_readable_text_not_the_matching_form():
+    """`changes[].text` is what a reader sees (#810): the diff dict's readable text, while
+    the collapsed form matching compares stays out of the document."""
+    change = {**_modified_change_with_id(), "old_readable_text": "(a) The old", "new_readable_text": "(a) The new"}
+    canonical = xml_diff_to_canonical(
+        _xml_diff_dict(changes=[change]), full_text=_READABLE_FULL_TEXT, full_text_spans=_READABLE_SPANS
+    )
+    assert canonical["changes"][0]["text"] == {"old": "(a) The old", "new": "(a) The new"}
+
+
+def test_the_card_shows_the_documents_text_as_it_is():
+    """The card reads `changes[].text` and slices nothing out of `full_text`, whatever
+    the spans say: the document's text is already what a reader sees (#810)."""
     canonical = xml_diff_to_canonical(
         _xml_diff_dict(changes=[_modified_change_with_id()]),
         full_text=_READABLE_FULL_TEXT,
         full_text_spans=_READABLE_SPANS,
     )
+    canonical["changes"][0]["text"] = {"old": "as exported, old", "new": "as exported, new"}
     cv = view_from_canonical(canonical).changes[0]
-    assert cv.old_text == "(a) The old"
-    assert cv.new_text == "(a) The new"
-
-
-def test_card_falls_back_to_body_when_no_full_text():
-    """Without full_text the card keeps the prior collapsed body text."""
-    canonical = xml_diff_to_canonical(_xml_diff_dict(changes=[_modified_change_with_id()]))
-    cv = view_from_canonical(canonical).changes[0]
-    assert cv.old_text == "(a)The old"
-    assert cv.new_text == "(a)The new"
-
-
-def test_card_added_slices_v2_only():
-    change = {
-        "change_type": "added",
-        "display_path_old": None,
-        "display_path_new": ["A"],
-        "old_text": None,
-        "new_text": "(a)The new",
-        "section_number": "",
-        "element_id_old": "",
-        "element_id_new": "E1",
-    }
-    canonical = xml_diff_to_canonical(
-        _xml_diff_dict(changes=[change]),
-        full_text=_READABLE_FULL_TEXT,
-        full_text_spans={"v1": {}, "v2": {"E1": (9, 20)}},
-    )
-    cv = view_from_canonical(canonical).changes[0]
-    assert cv.old_text == ""
-    assert cv.new_text == "(a) The new"
-
-
-def test_card_removed_slices_v1_only():
-    change = {
-        "change_type": "removed",
-        "display_path_old": ["A"],
-        "display_path_new": None,
-        "old_text": "(a)The old",
-        "new_text": None,
-        "section_number": "",
-        "element_id_old": "E1",
-        "element_id_new": "",
-    }
-    canonical = xml_diff_to_canonical(
-        _xml_diff_dict(changes=[change]),
-        full_text=_READABLE_FULL_TEXT,
-        full_text_spans={"v1": {"E1": (9, 20)}, "v2": {}},
-    )
-    cv = view_from_canonical(canonical).changes[0]
-    assert cv.old_text == "(a) The old"
-    assert cv.new_text == ""
-
-
-def test_card_modified_both_or_neither_on_asymmetric_span():
-    """If only one side of a modified change resolves a span, both fall back to body —
-    avoiding a spurious readable-vs-collapsed whitespace diff."""
-    canonical = xml_diff_to_canonical(
-        _xml_diff_dict(changes=[_modified_change_with_id()]),
-        full_text=_READABLE_FULL_TEXT,
-        full_text_spans={"v1": {"E1": (9, 20)}, "v2": {}},  # v2 unresolved
-    )
-    cv = view_from_canonical(canonical).changes[0]
-    assert cv.old_text == "(a)The old"
-    assert cv.new_text == "(a)The new"
-
-
-def test_card_pdf_source_is_not_sliced():
-    """The slice is gated on source=='xml'; PDF full_text (line-number gutters) is never
-    sliced into a card even when a span resolves."""
-    canonical = xml_diff_to_canonical(
-        _xml_diff_dict(changes=[_modified_change_with_id()]),
-        full_text=_READABLE_FULL_TEXT,
-        full_text_spans=_READABLE_SPANS,
-    )
-    canonical["versions"]["v1"]["source"] = "pdf"
-    cv = view_from_canonical(canonical).changes[0]
-    assert cv.old_text == "(a)The old"
-    assert cv.new_text == "(a)The new"
+    assert (cv.old_text, cv.new_text) == ("as exported, old", "as exported, new")
 
 
 def test_xml_full_text_spans_never_serialized_and_schema_valid():
@@ -942,7 +942,7 @@ def test_full_text_invalid_shape_rejected():
 def test_pdf_canonical_validates_against_json_schema():
     hunks = (
         PdfHunk("modified", SEC_101, SEC_101, (1, 10, 1, 20), (2, 5, 2, 8), "x", "y"),
-        PdfHunk("moved", SEC_101, SEC_201, (1, 10, 1, 20), (5, 1, 5, 12), "same", "same"),
+        PdfHunk("moved", SEC_101, SEC_201, (1, 10, 1, 20), (5, 1, 5, 12), "same", "same", move_kind="renumbered"),
         PdfHunk("modified", None, None, (3, 1, 3, 4), (3, 1, 3, 4), "a", "b"),
         PdfHunk("added", None, SEC_201, None, (5, 1, 5, 12), "", "new"),
     )

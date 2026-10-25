@@ -12,8 +12,8 @@ deleted before return), nothing is persisted.
     format_diff_html()     (formatters.diff_html) — HTML path (canonical → report)
 
 The XML pipeline resolves changes structurally (no page/line coordinates), and
-its full_text is gutterless paragraph flow — the renderer keys off
-``versions.v2.source == "xml"`` to drop the PDF line-number gutter.
+its full_text is gutterless paragraph flow, which the document states as
+``full_text_layout: "paragraphs"``.
 
 **This module is the only place a bill-XML report is assembled** (#42). The web app,
 the ``diff_bill.py compare`` CLI (both of its formats, #693), and ``render_examples.py``
@@ -28,6 +28,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from deltatrack.bill_identity import xml_identity
 from deltatrack.bill_tree import BillTree, normalize_bill
 from deltatrack.diff_bill import bill_diff_to_dict, diff_bills, filter_diff
 from deltatrack.formatters.canonical import xml_diff_to_canonical
@@ -77,9 +78,14 @@ def _build_from_trees(
         diff_dict["new_version_number"] = new_version_number
 
     # Readable full text + per-side element_id spans + the leveled structure tree.
-    full_text, full_text_spans, tree = build_xml_full_text(old_tree, new_tree)
+    full_text, full_text_spans, tree, node_ids = build_xml_full_text(old_tree, new_tree)
     return xml_diff_to_canonical(
-        diff_dict, full_text=full_text, full_text_spans=full_text_spans, tree=tree, title=new_tree.official_title
+        diff_dict,
+        full_text=full_text,
+        full_text_spans=full_text_spans,
+        tree=tree,
+        node_ids=node_ids,
+        version_identities={"v1": xml_identity(old_tree), "v2": xml_identity(new_tree)},
     )
 
 

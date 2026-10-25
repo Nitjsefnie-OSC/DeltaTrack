@@ -12,7 +12,7 @@ import difflib
 import json
 import sys
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from deltatrack.amounts import (
@@ -21,6 +21,7 @@ from deltatrack.amounts import (
     has_amendment_annotation,
     strip_amendment_annotations,
 )
+from deltatrack.bill_identity import combined, xml_identity
 from deltatrack.bill_tree import BillNode, BillTree, amount_text, normalize_bill
 from deltatrack.matching import (
     NEW,
@@ -32,6 +33,8 @@ from deltatrack.matching import (
     ObservationRef,
     RetrieverInvocation,
 )
+from deltatrack.move_kind import Placement, unit_and_number
+from deltatrack.move_kind import move_kind as kind_of_move
 from deltatrack.similarity import (
     MOVE_THRESHOLD,
     SIMILARITY_THRESHOLD,
@@ -1032,10 +1035,11 @@ class NodeDiff:
     # A no-op on the current corpus, and kept deliberately: display_text is the more
     # faithful rendering of a section (body_text stays collapsed for matching), and
     # removing these fields lets the two views drift apart again with nothing naming
-    # the rule. old_text/new_text stay body_text — they feed matching, text_diff and
-    # the JSON payload, which this does not touch. None means "no separate source
-    # recorded" (a hand-built NodeDiff); the amount_source_* properties then fall back
-    # to old_text/new_text.
+    # the rule. They are also the document's `text` (`readable_old/new`, #810): removing
+    # them would publish the collapsed `(a)Of` again. old_text/new_text stay body_text —
+    # they feed matching and text_diff. None means "no separate source recorded" (a
+    # hand-built NodeDiff); the amount_source_* properties then fall back to
+    # old_text/new_text.
     #
     # Why not remove them: see above — the no-op is the pinned agreement, not dead code.
     # History: #365 the two views read different renderings, because body_text was
@@ -1043,6 +1047,19 @@ class NodeDiff:
     # #422 removed that fast path.
     old_amount_text: str | None = None
     new_amount_text: str | None = None
+    # --- Each side's observation ordinal (#785) --------------------------------
+    # The ADR 0019 ordinal of the node on each side, copied from the settled
+    # correspondence's ObservationRef. The canonical producer maps it to the id of the
+    # structure-tree node built from the same parse. Run-local: valid only against the
+    # BillTree objects this diff was computed from, never stored as identity. None on a
+    # side the change has no node on, and on records built outside classification.
+    ordinal_old: int | None = None
+    ordinal_new: int | None = None
+    # --- What kind of move a `moved` record is (#807) ------------------------------
+    # Decided here, from the two nodes this round paired, by the rule both pipelines share
+    # (`move_kind.move_kind`); None on every other change type. The canonical document
+    # carries it rather than deciding again from the breadcrumbs.
+    move_kind: str | None = None
 
     @property
     def amount_source_old(self) -> str | None:
@@ -1054,10 +1071,27 @@ class NodeDiff:
         """New-side text that amount extraction should read (#365)."""
         return self.new_amount_text if self.new_amount_text is not None else self.new_text
 
+    @property
+    def readable_old(self) -> str | None:
+        """Old-side text as a reader sees it: the node's ``display_text``, the characters
+        the full text shows for it (#810). The amount source is that same rendering, so
+        this reads it; ``old_text`` stays the collapsed form matching compares."""
+        return self.amount_source_old
+
+    @property
+    def readable_new(self) -> str | None:
+        """New-side text as a reader sees it (see :attr:`readable_old`)."""
+        return self.amount_source_new
+
 
 @dataclass(frozen=True)
 class BillDiff:
-    """Complete diff between two bill versions."""
+    """Complete diff between two bill versions.
+
+    ``congress``, ``bill_type`` and ``bill_number`` are the bill the comparison is about,
+    each from the newer version when it states it, else the older (#808,
+    ``bill_identity.combined``). Unstated in both, they keep the tree's empty values.
+    """
 
     old_version: str
     new_version: str
@@ -1734,7 +1768,41 @@ def _moved_record(old_node: BillNode, new_node: BillNode) -> NodeDiff:
         # amounts stay readable (#365).
         old_amount_text=amount_text(old_node),
         new_amount_text=amount_text(new_node),
+        move_kind=kind_of_move(_placement(old_node), _placement(new_node)),
     )
+
+
+def _placement(node: BillNode) -> Placement:
+    """Where a node sits, for its move kind: its own heading label, its tag, and the
+    display path above it.
+
+    The display path, not the match path: the match path keys a title on its heading words
+    alone ("TITLE VII—GENERAL PROVISIONS" is ``general provisions``, a bare "TITLE IV" adds
+    nothing), so two different titles would read as one parent. ``structural_parent`` leaves
+    out the division and ignores case, which is all the normalization a parent needs.
+
+    A node's display path ends with its own label only when it has one; otherwise it ends
+    with the heading it inherited. A section owns its label when it has a number: one
+    printed without an ``<enum>`` carries its title's or division's label last, and reading
+    that as its own would "renumber" it from TITLE I to TITLE II. A subsection always appends
+    its own label. Any other node (an appropriations heading) is never a title or division
+    itself, so a title or division label last is inherited. A node with no label of its own
+    keeps its whole display path as ancestry.
+    """
+    path = node.display_path
+    if not path:
+        return Placement.of(None, node.tag, ())
+    if node.tag == "section":
+        own = bool(node.section_number)
+    elif node.tag == "subsection":
+        own = True
+    else:
+        own = unit_and_number(path[-1])[0] not in _CONTAINER_UNITS
+    return Placement.of(path[-1] if own else None, node.tag, path[:-1] if own else path)
+
+
+#: The units that contain provisions; an appropriations heading is never one of them.
+_CONTAINER_UNITS = frozenset({"division", "title", "subtitle", "chapter", "part"})
 
 
 def _classified(item: SettledCorrespondence, registry: ObservationRegistry) -> NodeDiff:
@@ -1749,12 +1817,18 @@ def _classified(item: SettledCorrespondence, registry: ObservationRegistry) -> N
     new_node = registry.node(correspondence.new[0]) if correspondence.new else None
 
     if old_node is None:
-        return _added_record(new_node)
-    if new_node is None:
-        return _removed_record(old_node)
-    if item.round == MOVE_ROUND:
-        return _moved_record(old_node, new_node)
-    return _paired_record(old_node, new_node)
+        record = _added_record(new_node)
+    elif new_node is None:
+        record = _removed_record(old_node)
+    elif item.round == MOVE_ROUND:
+        record = _moved_record(old_node, new_node)
+    else:
+        record = _paired_record(old_node, new_node)
+    return replace(
+        record,
+        ordinal_old=correspondence.old[0].ordinal if correspondence.old else None,
+        ordinal_new=correspondence.new[0].ordinal if correspondence.new else None,
+    )
 
 
 def classify(
@@ -1822,12 +1896,13 @@ def diff_bills(old: BillTree, new: BillTree) -> BillDiff:
     settled = settle_correspondences(pairs, registry, moves, round1_evidence=round1_evidence)
     changes = classify(settled, registry)
 
+    bill = combined(xml_identity(old), xml_identity(new))
     return BillDiff(
         old_version=old.version,
         new_version=new.version,
-        congress=old.congress,
-        bill_type=old.bill_type,
-        bill_number=old.bill_number,
+        congress=bill.congress,
+        bill_type=bill.bill_type,
+        bill_number=bill.bill_number,
         summary=_count_changes(changes),
         changes=changes,
     )
@@ -1850,6 +1925,11 @@ def bill_diff_to_dict(diff: BillDiff, *, financial: bool = False) -> dict:
             "section_number": c.section_number,
             "element_id_old": c.element_id_old,
             "element_id_new": c.element_id_new,
+            "ordinal_old": c.ordinal_old,
+            "ordinal_new": c.ordinal_new,
+            "move_kind": c.move_kind,
+            "old_readable_text": c.readable_old,
+            "new_readable_text": c.readable_new,
         }
         if financial:
             # Amounts come from the display rendering, not body_text (#365).
