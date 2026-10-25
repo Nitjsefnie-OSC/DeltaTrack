@@ -458,6 +458,7 @@ ALLOWED_CORPUS_SKIPS = {
 # has to be declared, not just the part the slow step collects — see the
 # test_bill_tree.py entry below, which skips in the fast tier.
 CI_SLOW_MODULES = (
+    "tests/test_research_financial_report.py",
     "tests/test_pdf_corpus_smoke.py",
     "tests/test_bill_tree.py",
     "tests/test_structure_tree.py",
