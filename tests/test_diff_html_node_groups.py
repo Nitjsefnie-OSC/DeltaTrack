@@ -1,8 +1,10 @@
 """Tests for tree-node grouping of cards and sidebar nav (#172).
 
-The renderer groups change cards and sidebar nav items by ``node_path`` (the
-own-span join breadcrumb), nesting one group per tree level. Changes the join
-couldn't place fall back to flat ``group_label`` groups; when NO change has a
+The renderer groups change cards and sidebar nav items by ``node_path``, the
+``(id, label, level)`` breadcrumb of the node the document names for each change
+(#785), nesting one group per tree level. Groups key on the node id, so two
+headings with one label stay apart, and siblings follow the id's preorder. Changes
+that name no node fall back to flat ``group_label`` groups; when NO change has a
 node_path (no tree in the canonical) the cards render flat exactly as before.
 
 Invariants pinned here because the page's JS depends on them:
@@ -37,7 +39,7 @@ def _change(**overrides) -> ChangeView:
     return ChangeView(**base)
 
 
-def _view(changes) -> DiffView:
+def _view(changes, node_order=None) -> DiffView:
     return DiffView(
         bill_type="hr",
         bill_number=1,
@@ -48,11 +50,13 @@ def _view(changes) -> DiffView:
         v2_version_number=None,
         summary={},
         changes=tuple(changes),
+        node_order=node_order or {},
     )
 
 
-TITLE = (("TITLE I", "title"),)
-ACCOUNT = (("TITLE I", "title"), ("SALARIES", "account"))
+TITLE = (("v2.0", "TITLE I", "title"),)
+ACCOUNT = (("v2.0", "TITLE I", "title"), ("v2.1", "SALARIES", "account"))
+TITLE_II = (("v2.2", "TITLE II", "title"),)
 
 
 def _details_depth_at(html: str, needle: str) -> int:
@@ -98,9 +102,9 @@ def test_cards_render_flat_when_no_change_has_a_node_path():
 
 def test_degraded_card_falls_back_to_group_label_group():
     html = _cards_section_html(_view([_change(node_path=TITLE), _change(group_label="TITLE IX")]))
-    assert ">TITLE IX<" in html
+    assert ">TITLE IX (not placed in the outline)<" in html
     # Fallback groups trail the node groups.
-    assert html.find(">TITLE I<") < html.find(">TITLE IX<")
+    assert html.find(">TITLE I<") < html.find(">TITLE IX (not placed")
 
 
 def test_cards_fallback_groups_first_appearance_and_uncategorized_last():
@@ -116,7 +120,34 @@ def test_cards_fallback_groups_first_appearance_and_uncategorized_last():
             ]
         )
     )
-    assert html.find(">TITLE I<") < html.find(">TITLE IX<") < html.find(">TITLE II<") < html.find(">Uncategorized<")
+    assert (
+        html.find(">TITLE I<")
+        < html.find(">TITLE IX (not placed")
+        < html.find(">TITLE II (not placed")
+        < html.find(">Uncategorized<")
+    )
+
+
+def test_an_unplaced_change_beside_its_titles_group_gets_a_heading_of_its_own():
+    """A change whose node the document can't name groups under its path's top label.
+    Beside the real "TITLE I" group that made a second "TITLE I" heading; the fallback
+    now says it is not that group, in both panes (#816)."""
+    view = _view([_change(node_path=TITLE), _change(group_label="TITLE I")])
+    cards = _cards_section_html(view)
+    assert cards.count(">TITLE I</summary>") == 1
+    assert '<summary class="change-group__label disclosure">TITLE I (not placed in the outline)</summary>' in cards
+    assert 'data-node="v2.0"' in cards
+    sidebar = _build_change_groups(view)
+    assert sidebar.count(">TITLE I <span") == 1
+    assert ">TITLE I (not placed in the outline) <span" in sidebar
+
+
+def test_without_an_outline_a_fallback_group_keeps_its_plain_label():
+    """A document without node identity groups every change this way, and there is no
+    outline heading to confuse a group with, so nothing is added."""
+    view = _view([_change(group_label="TITLE I"), _change(group_label="TITLE II")])
+    sidebar = _build_change_groups(view)
+    assert ">TITLE I <span" in sidebar and "not placed" not in sidebar
 
 
 def test_degraded_card_without_group_label_lands_in_uncategorized():
@@ -137,7 +168,7 @@ def test_group_labels_are_escaped_in_cards_and_sidebar():
     # Group labels come straight from bill text; a dropped escape() would ship
     # markup injection with the suite otherwise green.
     hostile = "<img src=x onerror=alert(1)>&"
-    view = _view([_change(node_path=((hostile, "title"),)), _change(group_label=hostile)])
+    view = _view([_change(node_path=(("v2.0", hostile, "title"),)), _change(group_label=hostile)])
     for html in (_cards_section_html(view), _build_change_groups(view)):
         assert hostile not in html
         assert "&lt;img" in html
@@ -146,74 +177,63 @@ def test_group_labels_are_escaped_in_cards_and_sidebar():
 # ---------- document-order group sorting -----------------------------------------
 
 
-def _order_map():
-    from deltatrack.formatters.diff_html import _node_order_map
-
-    tree = [
-        {
-            "label": "TITLE I",
-            "level": "title",
-            "own_amounts": [],
-            "full_text_span": None,
-            "children": [
-                {
-                    "label": "SALARIES",
-                    "level": "account",
-                    "own_amounts": [],
-                    "full_text_span": None,
-                    "children": [],
-                }
-            ],
-        },
-        {
-            "label": "TITLE II",
-            "level": "title",
-            "own_amounts": [],
-            "full_text_span": None,
-            "children": [],
-        },
-    ]
-    return _node_order_map(tree)
-
-
 def test_groups_follow_tree_document_order_not_change_order():
     # A change filed in a LATE v2 group can appear FIRST in the change list;
     # insertion order would hoist TITLE II above TITLE I in both panes.
     view = _view(
-        [
-            _change(node_path=(("TITLE II", "title"),)),
-            _change(node_path=TITLE),
-        ]
+        [_change(node_path=(("v2.10", "TITLE II", "title"),)), _change(node_path=(("v2.2", "TITLE I", "title"),))],
+        node_order={"v2.2": 2, "v2.10": 10},
     )
-    order_map = _order_map()
-    cards = _cards_section_html(view, order_map)
+    cards = _cards_section_html(view)
     assert -1 < cards.find(">TITLE I</summary>") < cards.find(">TITLE II</summary>")
-    sidebar = _build_change_groups(view, order_map)
+    sidebar = _build_change_groups(view)
     assert -1 < sidebar.find(">TITLE I <span") < sidebar.find(">TITLE II <span")
 
 
-def test_groups_keep_insertion_order_without_an_order_map():
+def test_group_order_comes_from_the_walk_not_the_id_text():
+    # The order the view recorded while walking the tree decides, even where the ids'
+    # numbers say otherwise: the renderer never parses a position out of an id (#816).
     view = _view(
-        [
-            _change(node_path=(("TITLE II", "title"),)),
-            _change(node_path=TITLE),
-        ]
+        [_change(node_path=(("v2.1", "TITLE II", "title"),)), _change(node_path=(("v2.5", "TITLE I", "title"),))],
+        node_order={"v2.5": 0, "v2.1": 1},
     )
-    html = _cards_section_html(view)
-    assert html.find(">TITLE II<") < html.find(">TITLE I<")
+    cards = _cards_section_html(view)
+    assert -1 < cards.find(">TITLE I</summary>") < cards.find(">TITLE II</summary>")
+    sidebar = _build_change_groups(view)
+    assert -1 < sidebar.find(">TITLE I <span") < sidebar.find(">TITLE II <span")
 
 
-def test_unknown_paths_trail_ordered_groups():
-    # A path the v2 order map doesn't know renders after the ordered groups,
-    # keeping insertion order.
+def test_an_id_without_a_number_still_renders():
+    view = _view(
+        [_change(node_path=(("v2.1", "TITLE I", "title"),)), _change(node_path=(("x", "TITLE II", "title"),))],
+        node_order={"x": 0, "v2.1": 1},
+    )
+    cards = _cards_section_html(view)
+    assert -1 < cards.find(">TITLE II</summary>") < cards.find(">TITLE I</summary>")
+
+
+def test_a_group_the_walk_did_not_see_trails_in_first_appearance_order():
     view = _view(
         [
-            _change(node_path=(("VANISHED TITLE", "title"),)),
-            _change(node_path=TITLE),
-        ]
+            _change(node_path=(("v2.9", "LATE", "title"),)),
+            _change(node_path=(("v2.1", "KNOWN", "title"),)),
+            _change(node_path=(("v2.5", "ALSO LATE", "title"),)),
+        ],
+        node_order={"v2.1": 0},
     )
-    html = _cards_section_html(view, _order_map())
-    assert html.find(">TITLE I<") < html.find(">VANISHED TITLE<")
+    cards = _cards_section_html(view)
+    assert -1 < cards.find(">KNOWN</summary>") < cards.find(">LATE</summary>") < cards.find(">ALSO LATE</summary>")
+
+
+def test_two_headings_with_one_label_stay_separate_groups():
+    """Grouping by label merged them; each is its own node in the document."""
+    first = (("v2.0", "TITLE I", "title"), ("v2.1", "SALARIES", "account"))
+    second = (("v2.0", "TITLE I", "title"), ("v2.5", "SALARIES", "account"))
+    view = _view([_change(node_path=first), _change(node_path=second), _change(node_path=first)])
+    sidebar = _build_change_groups(view)
+    assert sidebar.count(">SALARIES <span") == 2
+    assert "(2)" in sidebar and "(1)" in sidebar
+    assert _cards_section_html(view).count(">SALARIES</summary>") == 2
 
 
 # ---------- sidebar -------------------------------------------------------------

@@ -29,7 +29,7 @@
     },
     "full_text_layout": {
       "anyOf": [{ "type": "null" }, { "enum": ["numbered_lines", "paragraphs"] }],
-      "description": "Optional (v3.1+) how full_text is laid out. numbered_lines: each row is a 5-character right-aligned line number (5 spaces when unnumbered), 2 spaces, then the text; an empty row separates pages. paragraphs: plain text, an empty row is a paragraph break. Null exactly when full_text is."
+      "description": "Optional (v3.0+) how full_text is laid out. numbered_lines: each row is a 5-character right-aligned line number (5 spaces when unnumbered), 2 spaces, then the text; an empty row separates pages. paragraphs: plain text, an empty row is a paragraph break. Null exactly when full_text is."
     },
     "print_breaks": {
       "anyOf": [
@@ -44,7 +44,7 @@
           }
         }
       ],
-      "description": "Optional (v3.1+) where the printer broke a line inside a whole-word line of full_text, so a consumer can lay the text out as printed. Null when full_text was not printed (the XML pipeline)."
+      "description": "Optional (v3.0+) where the printer broke a line inside a whole-word line of full_text, so a consumer can lay the text out as printed. Null when full_text was not printed (the XML pipeline)."
     },
     "tree": {
       "anyOf": [
@@ -54,8 +54,8 @@
           "required": ["v1", "v2"],
           "additionalProperties": false,
           "properties": {
-            "v1": { "type": "array", "items": { "$ref": "#/$defs/TreeNode" } },
-            "v2": { "type": "array", "items": { "$ref": "#/$defs/TreeNode" } }
+            "v1": { "type": "array", "items": { "$ref": "#/$defs/TreeNodeV1" } },
+            "v2": { "type": "array", "items": { "$ref": "#/$defs/TreeNodeV2" } }
           }
         }
       ],
@@ -70,18 +70,8 @@
       }
     },
     "bill": {
-      "type": "object",
-      "required": ["type", "number", "congress"],
-      "additionalProperties": false,
-      "properties": {
-        "type": { "type": "string" },
-        "number": { "type": ["integer", "string"] },
-        "congress": { "type": ["integer", "string"] },
-        "title": {
-          "type": ["string", "null"],
-          "description": "Optional (v3.1+) the bill's long title (\"Making appropriations for...\"), or null when the producer found none."
-        }
-      }
+      "$ref": "#/$defs/Bill",
+      "description": "The bill the comparison is about: each field from versions.v2.bill when it states one, else from versions.v1.bill."
     },
     "versions": {
       "type": "object",
@@ -130,10 +120,37 @@
       }
     },
     "TreeNode": {
+      "description": "A structure-tree node of either side. Its fields are TreeNodeShape's; each child is a TreeNode.",
+      "allOf": [{ "$ref": "#/$defs/TreeNodeShape" }],
+      "properties": { "children": { "items": { "$ref": "#/$defs/TreeNode" } } }
+    },
+    "TreeNodeV1": {
+      "description": "A node of tree.v1: its id, and each descendant's, carries the v1 prefix.",
+      "allOf": [{ "$ref": "#/$defs/TreeNodeShape" }],
+      "properties": {
+        "id": { "pattern": "^v1\\." },
+        "children": { "items": { "$ref": "#/$defs/TreeNodeV1" } }
+      }
+    },
+    "TreeNodeV2": {
+      "description": "A node of tree.v2: its id, and each descendant's, carries the v2 prefix.",
+      "allOf": [{ "$ref": "#/$defs/TreeNodeShape" }],
+      "properties": {
+        "id": { "pattern": "^v2\\." },
+        "children": { "items": { "$ref": "#/$defs/TreeNodeV2" } }
+      }
+    },
+    "TreeNodeShape": {
+      "description": "A tree node's fields. `children` is only typed here: each of TreeNode, TreeNodeV1 and TreeNodeV2 names what its children are, so a subtree is validated once rather than once per wrapper.",
       "type": "object",
       "required": ["label", "level", "own_amounts", "full_text_span", "children"],
       "additionalProperties": false,
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^v[12]\\.(0|[1-9][0-9]*)$",
+          "description": "Optional (v3.0+) the node's identifier: its side, then its 0-based preorder position in that side's tree (\"v1.17\"). Unique per side and deterministic for the same inputs and implementation, but NOT persistent across versions, parser revisions or tree changes. Never derived from label text."
+        },
         "label": { "type": "string" },
         "level": {
           "enum": ["division", "title", "major", "agency", "account", "section", "subsection", "grouping", "preamble", "heading"],
@@ -145,7 +162,15 @@
           "description": "Dollar amounts in THIS node's own block only (not its children's)."
         },
         "full_text_span": { "$ref": "#/$defs/Offset" },
-        "children": { "type": "array", "items": { "$ref": "#/$defs/TreeNode" } }
+        "heading_span": {
+          "$ref": "#/$defs/Offset",
+          "description": "Optional (v3.0+) the whole row of full_text[side] that the node's heading is printed on (for PDF a whole-word row, which can cover several printed lines once print_breaks are applied); null when the producer has no such row for this node. Never found by searching for the label."
+        },
+        "body_span": {
+          "$ref": "#/$defs/Offset",
+          "description": "Optional (v3.0+) the node's own body in full_text[side], not its children's; null when the node has no text of its own or the producer cannot place it."
+        },
+        "children": { "type": "array" }
       }
     },
     "VersionInfo": {
@@ -155,7 +180,25 @@
       "properties": {
         "label": { "type": "string" },
         "version_number": { "type": ["integer", "null"] },
-        "source": { "enum": ["xml", "pdf"] }
+        "source": { "enum": ["xml", "pdf"] },
+        "bill": {
+          "$ref": "#/$defs/Bill",
+          "description": "Optional (v3.0+) what this version itself states about the bill. An unstated field is \"\" (null for title)."
+        }
+      }
+    },
+    "Bill": {
+      "type": "object",
+      "required": ["type", "number", "congress"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string" },
+        "number": { "type": ["integer", "string"] },
+        "congress": { "type": ["integer", "string"] },
+        "title": {
+          "type": ["string", "null"],
+          "description": "Optional (v3.0+) the bill's long title (\"Making appropriations for...\"), or null when none was found."
+        }
       }
     },
     "Change": {
@@ -197,6 +240,21 @@
             "v1": { "$ref": "#/$defs/PathArray" },
             "v2": { "$ref": "#/$defs/PathArray" }
           }
+        },
+        "node": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["v1", "v2"],
+              "additionalProperties": false,
+              "properties": {
+                "v1": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^v1\\.(0|[1-9][0-9]*)$" }] },
+                "v2": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^v2\\.(0|[1-9][0-9]*)$" }] }
+              }
+            }
+          ],
+          "description": "Optional (v3.0+) the id of the tree node holding this change on each side. Side v1 applies to removed, modified and moved changes, side v2 to added, modified and moved; an inapplicable side is null, and an applicable side that is null is unresolved. Null when the document has no tree."
         },
         "location": {
           "anyOf": [
@@ -272,7 +330,7 @@
       "required": ["kind", "old_label", "new_label", "body_unchanged"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "const": "renumbered" },
+        "kind": { "enum": ["renumbered", "relocated_and_renumbered"] },
         "old_label": { "type": "string" },
         "new_label": { "type": "string" },
         "body_unchanged": { "type": "boolean" }

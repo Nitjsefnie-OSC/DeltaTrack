@@ -448,6 +448,7 @@ ALLOWED_CORPUS_SKIPS = {
 # has to be declared, not just the part the slow step collects — see the
 # test_bill_tree.py entry below, which skips in the fast tier.
 CI_SLOW_MODULES = (
+    "tests/test_research_financial_report.py",
     "tests/test_pdf_corpus_smoke.py",
     "tests/test_bill_tree.py",
     "tests/test_structure_tree.py",
@@ -466,6 +467,7 @@ CI_SLOW_MODULES = (
     "tests/test_pdf_watermark_recall.py",
     "tests/test_formatters_text_serializer.py",
     "tests/test_validate_extraction.py",
+    "tests/test_move_kind.py",
     # Named in its own CI step (the packaging gate, #398) rather than the slow-suite step,
     # but the convention keys on being named by SOME CI slow step, not on which one.
     # Deliberately carries NO entry in the allowlist below: its only skip channel is `uv`
@@ -1124,3 +1126,13 @@ def make_change_dict(*, change_type="modified", path=None, financial=None, index
         "element_id_new": f"new-{index}",
         **({"financial": financial} if financial else {}),
     }
+
+
+def with_readable_text(diff_dict: dict) -> dict:
+    """A hand-built XML diff dict as ``bill_diff_to_dict`` emits it: each change's readable
+    text, which the canonical producer requires (#810), stated as the fixture's own text.
+    A fixture that means the collapsed and readable forms to differ sets both itself."""
+    for change in diff_dict.get("changes") or []:
+        change.setdefault("old_readable_text", change.get("old_text"))
+        change.setdefault("new_readable_text", change.get("new_text"))
+    return diff_dict

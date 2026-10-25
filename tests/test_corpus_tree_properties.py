@@ -47,7 +47,7 @@ from deltatrack.bill_tree import extract_text_content, find_bill_bodies, find_bi
 from deltatrack.diff_bill import extract_amounts
 from deltatrack.formatters.canonical import _pdf_tree_payload
 from deltatrack.formatters.diff_html import _build_tree_nav
-from deltatrack.formatters.text_serializer import _xml_tree_payload, serialize_tree_for_tree
+from deltatrack.formatters.text_serializer import _serialize_layout, _xml_tree_payload
 from deltatrack.parsers.pdf_text import pdf_full_text
 from tests.conftest import CORPUS_SWEEP, assert_manifest_committed, manifest_pdf_files, manifest_xml_files
 from tests.corpus_paths import fixture_path
@@ -187,8 +187,8 @@ def _xml_tree_payload_for(path: Path) -> tuple[list[dict], str]:
     """The contract-shaped XML tree for one version, plus its full_text — built the
     way ``build_xml_full_text`` does, without the diff (the tree is per-side)."""
     bill = parsed_bill(path)
-    text, _sections, spans, heading_offsets = serialize_tree_for_tree(bill)
-    return _xml_tree_payload(bill, spans, heading_offsets), text
+    layout = _serialize_layout(bill)
+    return _xml_tree_payload(bill, layout, "v2")[0], layout.text
 
 
 def _pdf_tree_payload_for(path: Path) -> tuple[list[dict], str, tuple, dict]:
@@ -206,7 +206,7 @@ def _pdf_tree_payload_for(path: Path) -> tuple[list[dict], str, tuple, dict]:
     pages = cached_pages(path)
     full_text, offsets = pdf_full_text(pages)
     anchors = cached_anchors(path)
-    return _pdf_tree_payload(anchors, offsets, full_text), full_text, anchors, offsets
+    return _pdf_tree_payload(anchors, offsets, full_text, "v2")[0], full_text, anchors, offsets
 
 
 def _walk(nodes: list[dict]):
@@ -228,14 +228,18 @@ def _raw_xml_body_amounts(path: Path) -> Counter:
 
     So BODY SELECTION, the thing #434 changed, is done here with a direct ``findall``
     rather than through production code: if ``find_bill_bodies`` ever starts skipping a
-    body again, this reference still counts it and the gate fails. Only the resolution
-    and amendment-doc shapes, which have no top-level ``legis-body`` at all, fall back to
-    production traversal -- reimplementing that lookup here would be a second copy free
-    to drift, and those shapes carry exactly one body, so the failure this guards against
-    cannot arise in them.
+    body again, this reference still counts it and the gate fails. An engrossed
+    amendment's bodies are its amendment blocks, selected the same way: it can carry
+    several, and reading only the first dropped 114-hr-2029 v6's Division Q (#836). Only
+    the resolution shape, which carries exactly one body, falls back to production
+    traversal -- reimplementing that lookup here would be a second copy free to drift.
     """
     root = ET.parse(path).getroot()
-    bodies = root.findall("legis-body") or find_bill_bodies(root)
+    bodies = (
+        root.findall("legis-body")
+        or root.findall(".//engrossed-amendment-body/amendment/amendment-block")
+        or find_bill_bodies(root)
+    )
     return Counter(amount for body in bodies for amount in extract_amounts(extract_text_content(body)))
 
 

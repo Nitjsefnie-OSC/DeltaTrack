@@ -10,8 +10,10 @@ These tests pin the contract; the renderer's own snapshot tests come later.
 
 from __future__ import annotations
 
-from deltatrack.formatters.canonical import view_from_canonical, xml_diff_to_canonical
+from deltatrack.formatters.canonical import xml_diff_to_canonical
+from deltatrack.formatters.canonical_view import view_from_canonical
 from deltatrack.formatters.view_model import ChangeView, DiffView
+from tests.conftest import with_readable_text
 
 
 def xml_dict_to_view(diff_dict: dict) -> DiffView:
@@ -35,7 +37,7 @@ def _diff_dict(*, changes=None, **overrides) -> dict:
         "changes": changes or [],
     }
     base.update(overrides)
-    return base
+    return with_readable_text(base)
 
 
 def test_returns_diff_view_with_metadata():
@@ -154,6 +156,7 @@ def test_moved_change_renders_move_info_html():
         "old_text": "same text",
         "new_text": "same text",
         "section_number": "",
+        "move_kind": "relocated",
     }
     view = xml_dict_to_view(_diff_dict(changes=[change]))
     cv = view.changes[0]

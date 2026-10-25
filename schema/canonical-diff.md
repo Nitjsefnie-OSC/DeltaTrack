@@ -1,4 +1,4 @@
-# Canonical Diff JSON — v3.1
+# Canonical Diff JSON — v3.0
 
 This document specifies the canonical JSON shape produced when comparing two
 versions of a bill. It is the public contract between the diff engine and any
@@ -8,7 +8,7 @@ XML inputs and a diff produced from PDF inputs share this shape.
 
 ## Versioning
 
-Top-level field: `schema_version: "3.1"`.
+Top-level field: `schema_version: "3.0"`.
 
 - A consumer claiming support for this contract MUST reject a document whose major
   version it does not support, rather than interpreting it as the current shape. This
@@ -27,43 +27,6 @@ Top-level field: `schema_version: "3.1"`.
   parallel pull requests would collide on the same next number.
 
 ## Changelog
-
-- **3.1** — Added optional top-level `print_breaks: { v1, v2 } | null` (#653): where
-  the printer broke a line inside each whole-word line of `full_text`, so a consumer
-  can lay the text out as printed. Additive, backward compatible.
-
-  It exists because the printed layout is not recoverable from the whole-word text,
-  and the PDF pipeline used to ship a second, print-faithful document beside this one
-  for its own report, with different text and offsets. The report and the exported
-  document disagreed on most change spans, so what a reader downloaded was not what
-  they were looking at. One document now serves both: `full_text` stays whole-word,
-  and the report applies `print_breaks` to show the printed page.
-
-  Whether a break hyphen belongs to the word is decided by the producer, not left to
-  the consumer. GPO breaks a hyphenated compound at its own hyphen and breaks a long
-  word at a syllable, and prints the two identically: `INTEL-` / `LIGENCE` is
-  `INTELLIGENCE`, `McKinney-` / `Vento` is `McKinney-Vento`. The producer decides it
-  from how the document spells that word elsewhere (#650). Before this field, three
-  consumers each re-derived the rule and three disagreed.
-
-  Also added optional top-level `full_text_layout`, which states how `full_text` is
-  laid out (`"numbered_lines"` or `"paragraphs"`) and writes the rule for each into
-  this contract. A renderer used to infer it from `versions.v2.source` and slice a
-  line-number column whose width only the producer defined.
-
-  Also added optional `bill.title`, the bill's long title. The report heading used to
-  travel to the renderer beside the document, so a report could not be rebuilt from a
-  saved document alone. The PDF pipeline now also fills `bill.type` and `bill.number`
-  from the printed designator, which it previously read and discarded.
-
-  `summary` producers now omit zero-count keys and the non-canonical `unchanged` key
-  (#706). Neither is a schema change: the contract's "Keys with zero count MAY be
-  omitted" sentence already permitted the former, and `unchanged` was never one of the
-  four canonical keys — it counted entries the document does not carry. Both changes
-  restore the pipeline-neutrality promise this contract exists to make: the XML producer
-  seeded five keys including zeros, the PDF producer (a Counter over present change
-  types) omitted zeros and never emitted `unchanged`, so identical legislative content
-  reported different summary shapes depending on the input format.
 
 - **3.0** — **Breaking:** removed `amount_entries` from each change object and from
   its `required` list (#671). No field replaces it: a change object now carries no
@@ -91,6 +54,86 @@ Top-level field: `schema_version: "3.1"`.
   it needs first is #115 and #175, so an amount can be attached to an account and
   classified as appropriation, sub-allocation, ceiling or limitation before it is
   shown as a number in a Change column.
+
+  Also added optional top-level `print_breaks: { v1, v2 } | null` (#653): where
+  the printer broke a line inside each whole-word line of `full_text`, so a consumer
+  can lay the text out as printed.
+
+  It exists because the printed layout is not recoverable from the whole-word text,
+  and the PDF pipeline used to ship a second, print-faithful document beside this one
+  for its own report, with different text and offsets. The report and the exported
+  document disagreed on most change spans, so what a reader downloaded was not what
+  they were looking at. One document now serves both: `full_text` stays whole-word,
+  and the report applies `print_breaks` to show the printed page.
+
+  Whether a break hyphen belongs to the word is decided by the producer, not left to
+  the consumer. GPO breaks a hyphenated compound at its own hyphen and breaks a long
+  word at a syllable, and prints the two identically: `INTEL-` / `LIGENCE` is
+  `INTELLIGENCE`, `McKinney-` / `Vento` is `McKinney-Vento`. The producer decides it
+  from how the document spells that word elsewhere (#650). Before this field, three
+  consumers each re-derived the rule and three disagreed.
+
+  Also added optional top-level `full_text_layout`, which states how `full_text` is
+  laid out (`"numbered_lines"` or `"paragraphs"`) and writes the rule for each into
+  this contract. A renderer used to infer it from `versions.v2.source` and slice a
+  line-number column whose width only the producer defined.
+
+  Also added optional `bill.title`, the bill's long title. The report heading used to
+  travel to the renderer beside the document, so a report could not be rebuilt from a
+  saved document alone. The PDF pipeline now also fills `bill.type` and `bill.number`
+  from the printed designator, which it previously read and discarded.
+
+  Also added node identity (#785, ADR 0006): optional `id`, `heading_span` and
+  `body_span` on each `tree` node, and optional `node: { v1, v2 } | null` on each
+  change, naming the tree node that holds it on each side. A consumer used to recover
+  which node a change sits in by joining spans and matching labels, which misfiled
+  changes wherever two headings share a name; it can now read the producer's answer.
+  The spans state where the producer printed a node's heading and body, so a consumer
+  no longer searches the text for a label. `full_text_span` keeps its meaning. The
+  JSON Schema checks each side's tree separately, so a `tree.v1` node's `id` must
+  carry the `v1` prefix (#816).
+
+  Also added optional `versions.v1.bill` and `versions.v2.bill` (#808): what each
+  version itself states about the bill. `bill` is now the two combined by one rule on
+  both pipelines, each field from v2 when v2 states it, else from v1. The XML pipeline
+  used to read the type, number and Congress from v1 only and the title from v2 only;
+  the PDF pipeline read every field from v2 only. A pair with an engrossed amendment on
+  the side read lost what the amendment does not state: a House engrossed amendment's
+  XML has no type or number, an engrossed amendment's XML has no title, and its print
+  has no cover, so no Congress. An XML `bill.title` now falls back to v1's title when
+  v2 has none, which also heads the report. The PDF pipeline's `congress` is now an
+  integer, as the XML pipeline's is, and its title starts with a capital letter where an
+  amendment quotes it in lower case ("entitled ‘‘An Act making…’’").
+
+  Also added `move.kind` `"relocated_and_renumbered"` (#807), and `move.kind` is now
+  decided by one rule on both pipelines, by the differ that found the move (see
+  [`move`](#move)). The XML producer used to call a move renumbered when its last
+  breadcrumb changed under the same parent, which called an unnumbered section that
+  gained a number renumbered from its division's label; the PDF producer when its
+  heading text changed at all, which called a heading that only wrapped differently
+  across two printed lines renumbered.
+
+  Also, XML `changes[].text` is now the readable text (#810), the characters
+  `full_text` shows for the node. It used to be the collapsed form the matcher compares
+  (`(a)Of`, `include—(1)`), which the report replaced with a `full_text` slice for
+  documents whose `versions.v1.source` was `"xml"`; the exported document disagreed with
+  the cards on whitespace in 7,916 XML text sides of the committed corpus. A consumer no
+  longer branches on `source` to read `text`, and `move.body_unchanged` compares that
+  text, as it is defined to.
+
+  Also, an XML section inside a title is labelled `Sec. N` in `path`, `tree` and
+  `move` labels (#810), as one outside a title already was; it used to carry the
+  matcher's lowercased key, `sec. 101` (`sec. 119a` for `Sec. 119A`).
+
+  Also, an XML change in the bill's opening with no heading of its own has the path
+  `["Front Matter"]`, as the PDF pipeline's does and as `tree` places its node (#810);
+  it used to be `null`. And a `tree` label of `""` is defined as a node with no heading
+  of its own, not only an empty-path root.
+
+  Summary producers now omit zero-count keys and the non-canonical `unchanged`
+  key (#706). The contract already permits omitting zeros; unchanged entries are
+  excluded from `changes`, so their count has no referent in the canonical document.
+
 - **2.0** — **Breaking:** removed the deprecated `amounts` field from each change
   object and from its `required` list (#274). `amount_entries` fully supersedes it.
   `amounts` held only the `changed`-kind subset, so it structurally could not
@@ -147,7 +190,7 @@ Top-level field: `schema_version: "3.1"`.
 
 ```jsonc
 {
-  "schema_version": "3.1",
+  "schema_version": "3.0",
   "generator": { "name": "deltatrack", "version": "0.x" },
   "bill":      { "type": "hr", "number": 4366, "congress": 118, "title": "Making appropriations…" },
   "versions": {
@@ -159,7 +202,7 @@ Top-level field: `schema_version: "3.1"`.
     "v1": "TITLE I—…\n\nSECTION 101. …",
     "v2": "TITLE I—…\n\nSECTION 101. …"
   },
-  "print_breaks": {                         // optional, v3.1+ (PDF only)
+  "print_breaks": {                         // optional, v3.0+ (PDF only)
     "v1": { "at": [1274, 331, 402], "drop": "101", "line": [9, 4, 1], "seam": "001" },
     "v2": { "at": [1274, 331, 402], "drop": "101", "line": [9, 4, 1], "seam": "001" }
   },
@@ -185,7 +228,7 @@ fragments in `changes[].text` — `full_text` is the document; `text.old`/
 rendering should compute the diff at render time over the full strings,
 not try to splice the change fragments into the document.
 
-### `full_text_layout` (optional, v3.1+)
+### `full_text_layout` (optional, v3.0+)
 
 How `full_text` is laid out, so a consumer reads rows and line numbers by rule
 instead of guessing them from the pipeline. `null` (or absent) exactly when
@@ -196,11 +239,11 @@ instead of guessing them from the pipeline. `null` (or absent) exactly when
 | `"numbered_lines"` | PDF | One row per line: its printed line number right-aligned in 5 characters (5 spaces when the line is unnumbered), then 2 spaces, then the line's text. An empty row separates one page from the next; pages count from 1. A line row is never empty, so the separator cannot be mistaken for a line. |
 | `"paragraphs"` | XML | Plain text with no line numbers or pages. An empty row is a paragraph break. |
 
-A 3.0 document has no `full_text_layout`. Its PDF text is `"numbered_lines"` and
-its XML text `"paragraphs"`, which a reader may take from `versions.v2.source`;
-that fallback exists for those documents only.
+A document that carries `full_text` without `full_text_layout` lays out its PDF
+text as `"numbered_lines"` and its XML text as `"paragraphs"`, which a reader may
+take from `versions.v2.source`; that fallback exists for those documents only.
 
-### `print_breaks` (optional, v3.1+)
+### `print_breaks` (optional, v3.0+)
 
 Per side, every place the printer broke a line inside one of `full_text`'s
 whole-word lines (`numbered_lines` layout). The PDF pipeline joins a word the printer
@@ -234,7 +277,7 @@ it produces, can differ for the same PDF compared against a different version. T
 same holds for the whole-word `full_text` the PDF pipeline ships.
 
 **Why the producer carries this.** Whether a break hyphen belongs to the word is not
-decidable from the break — see the 3.1 changelog entry. A consumer may apply these
+decidable from the break — see the 3.0 changelog entry. A consumer may apply these
 breaks; it may not re-infer them.
 
 ### `tree` (optional, v1.3+)
@@ -249,10 +292,13 @@ A `TreeNode`:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `label` | string | The node's own heading text (`""` for an empty-path root). |
+| `label` | string | The node's own heading text; `""` when the node has no heading of its own (masthead and enacting-clause boilerplate, a section printed without a heading). A renderer skips an empty label in a breadcrumb or outline but keeps the node. |
 | `level` | enum | Shared GPO vocabulary: `division`, `title`, `major`, `agency`, `account`, `section`, `subsection`, `grouping`, `preamble`, `heading`. Leaf level is typed from the source tag/kind; interior levels are positional (`heading` when an interior container has no typed source). `subsection` nests under its `section` on both pipelines: XML emits every direct non-quoted `<subsection>` (#188), the PDF the catchline-bearing run-in subset (#96). |
 | `own_amounts` | int[] | Dollar amounts in **this node's own block only** (never its children's). The union over all nodes conserves the bill's amounts exactly. |
+| `id` | string | Optional (v3.0+). See [Node identity](#node-identity-optional-v30). |
 | `full_text_span` | Offset \| null | `{ start, end }` char range into `full_text[side]` locating this node; `null` when it can't be located. Reference only — never duplicates the text. |
+| `heading_span` | Offset \| null | Optional (v3.0+). The whole row of `full_text[side]` the node's heading is printed on: for PDF, a whole-word row, which can cover several printed lines. See below. |
+| `body_span` | Offset \| null | Optional (v3.0+). The node's own body in `full_text[side]`, never its children's. See below. |
 | `children` | TreeNode[] | Ordered child nodes. |
 
 The tree is **per-side, independently built, not paired** — cross-version
@@ -263,14 +309,57 @@ derivable from this tree, and since #462 it is the renderer's only source for
 the navigation: the separate flat `sections` jump-list and the builder that read
 it were removed.
 
+#### Node identity (optional, v3.0+)
+
+`id` is `"<side>.<n>"`, for example `"v1.17"`: the node's side, then its 0-based
+position in a preorder walk of that side's tree, counting every node, unlabeled ones
+included.
+
+- **Unique per side**, and the side prefix means an identifier from one side can never
+  equal one from the other. Two nodes with the same label, or the same full path, still
+  have different identifiers.
+- **Deterministic:** the same inputs and the same implementation give the same
+  identifiers.
+- **Not persistent.** An identifier names a node in this document only. It is not
+  stable across versions of a bill, parser revisions, or changes to how the tree is
+  built, and it says nothing about which node in the other version corresponds to this
+  one; that is what `changes` is for. It is never derived from label text, so a
+  relabelled heading keeps its identifier when the tree's shape is unchanged.
+
+`heading_span` and `body_span` are facts the producer recorded while writing
+`full_text`, never found by searching it for a label. A present span is never empty.
+JSON Schema can't state that, or that `end` is not before `start`, so the JSON Schema
+accepts `{5, 5}` and `{9, 3}`; the producer's tests enforce both. Nor can it check that
+an `id`'s number is the node's preorder position. It checks the side prefix, per side,
+and a consumer that needs the order counts it while walking the tree, as the report does.
+**`null` means the producer does not have the fact**; it is never a substitute such as
+the node's first row.
+
+| | XML (`paragraphs`) | PDF (`numbered_lines`) |
+|---|---|---|
+| `heading_span` | The earliest row printed as this node's heading: a heading line printed for its path while writing it or anything inside it, its run-in `SEC. NN.` or `(a)` row (which also starts its body), or a pathless node's header line. `null` where no row was printed for the node: the synthesized Front Matter group, boilerplate without a header, and a node whose whole path was already in the heading run printed for the node before it. A later node on a repeated path whose heading *is* printed again takes that row, never the first occurrence | The anchor's whole-word row, gutter included: one row of `full_text`, which holds the printed line and any continuation lines the producer joined to it, so laid out with `print_breaks` it can cover several printed lines (114-hr-2029 `v1.29`, `SEC. 102`, covers 3). `null` where no anchor backs the node (a heading reconstructed from breadcrumbs), for the synthesized Front Matter anchor, and for an anchor whose row is outside the line-offset table |
+| `body_span` | The node's own body text. `null` for a node with no text of its own: a container built from a path, or a section whose body is empty | The node's block rows after heading lines are trimmed, first row to last, gutter included. `null` where no anchor backs the node, when the anchor's block is empty, or when an end row is outside the line-offset table (an unnumbered line is never in it) |
+
+A PDF span covers printed rows, so it includes the line-number gutter. A consumer
+wanting the plain text reads the rows as `full_text_layout` defines them rather than
+slicing.
+
 ### `bill`
+
+The bill the comparison is about. Each field is v2's when v2 states it, else v1's
+(`versions.v1.bill` and `versions.v2.bill` carry each version's own reading). The later
+version wins a disagreement because it is the bill as it now stands: a bill used as the
+vehicle for other legislation keeps its number but takes a new long title. An unstated
+field is `""` (`null` for `title`). An engrossed amendment states the least: it has no
+cover page, so its print names no Congress; its XML has no official title, and a House
+engrossed amendment's XML has no type or number.
 
 | Field      | Type              | Notes                                                       |
 |------------|-------------------|-------------------------------------------------------------|
 | `type`     | string            | Lowercase bill type code, e.g., `"hr"`, `"s"`, `"hjres"`. May be empty. The PDF pipeline reads it from the printed designator (`H.R.` → `"hr"`). |
 | `number`   | integer \| string | Integer for canonical bills (e.g., `4366`); string for drafts or non-numeric identifiers. |
-| `congress` | integer \| string | Congress number, e.g., `118`. May be empty string when unknown. |
-| `title`    | string \| null    | Optional (v3.1+). The bill's long title, e.g. `"Making appropriations for…"`; `null` when none was found. XML takes it from the bill's official title; PDF reads it, best-effort, from the text after "AN ACT" / "A BILL". |
+| `congress` | integer \| string | Congress number, e.g., `118`. Empty string when neither version states it. |
+| `title`    | string \| null    | Optional (v3.0+). The bill's long title, e.g. `"Making appropriations for…"`; `null` when none was found. XML takes it from the bill's official title; PDF reads it, best-effort, from the text after "AN ACT" / "A BILL". |
 
 ### `versions.v1` and `versions.v2`
 
@@ -279,6 +368,7 @@ it were removed.
 | `label`          | string              | Human-readable label, e.g., `"Engrossed in House"`, `"Public Law"`, `"draft"`.              |
 | `version_number` | integer \| null     | The version's per-bill ordinal, the `n` of an `n_label` input filename (ADR 0013), on either pipeline; `null` when the filename carries none. Not a GPO bill-version code (`ih`, `enr`). |
 | `source`         | `"xml"` \| `"pdf"`  | Provenance. Lets consumers reason about structural confidence.                              |
+| `bill`           | object              | Optional (v3.0+). What this version itself states about the bill, in the shape of [`bill`](#bill): an unstated field is `""` (`null` for `title`). Where the two versions disagree, `bill` holds v2's value; each version's own reading stays here. |
 
 ### `summary`
 
@@ -308,6 +398,7 @@ that need a different order MUST resort.
   "anchor_resolution": "resolved",
   "text":    { "old": "...", "new": "..." },
   "move":    null,
+  "node":    { "v1": "v1.42", "v2": "v2.40" },  // optional, v3.0+
   "full_text_span": {                            // optional, v1.2+
     "v1": { "start": 4823, "end": 4961 },
     "v2": { "start": 4823, "end": 4972 }
@@ -346,18 +437,55 @@ major/department segment above it
 SUPPORT`, DeltaTrack#105), reaching the depth the XML side already emits; renderers
 join whatever segments are present and need no per-pipeline branch.
 
+A segment is a display label, the form a reader sees, never a matcher's key. An XML
+section is `Sec. N` (its number as printed, `Sec. 119A`) wherever it sits, inside a
+title or not; `tree` labels use the same form.
+
 | Side | When `null`                                         |
 |------|-----------------------------------------------------|
 | `v1` | Pure additions (`change_type: "added"`).            |
 | `v2` | Pure removals (`change_type: "removed"`).           |
+| either | XML: the side's node has no heading of its own and sits outside Front Matter (e.g. an enacting clause after a title). Nothing in `tree` names a place for it. |
 
 For `change_type: "moved"`, both sides are present and may differ.
 
 For PDF diffs where neither anchor resolved, both sides are `null` and
 `anchor_resolution` is `"degraded"`.
 
+A change in the bill's opening that has no heading of its own (masthead,
+enacting-clause boilerplate) has the path `["Front Matter"]` on both pipelines, the
+node `tree` groups it under. A section in the opening that has its own number keeps
+its own path (`["Sec. 2"]`, `["SEC. 2"]`), without a Front Matter prefix, on both
+pipelines: `tree` still groups its node under Front Matter, and its label there may be
+the section's heading ("Table of contents") rather than its number.
+
 Renderers MUST escape segments individually before joining (a literal `>` in a
 segment must not collide with a `>` separator).
+
+### `node` (optional, v3.0+)
+
+The `id` of the `tree` node that holds this change, per side.
+
+```jsonc
+"node": { "v1": "v1.42" | null, "v2": "v2.40" | null } | null
+```
+
+| Side | Applies to | Inapplicable |
+|------|------------|--------------|
+| `v1` | `removed`, `modified`, `moved` | `added` |
+| `v2` | `added`, `modified`, `moved` | `removed` |
+
+- An inapplicable side is `null`.
+- An applicable side that is `null` is **unresolved**: the producer could not name the
+  node. A consumer MUST NOT guess one from `path` or labels.
+- The whole field is `null` exactly when the document has no `tree`: a document with a
+  `tree` gives every change a `node` object, and the producer refuses to build one
+  otherwise (#816).
+
+The producer resolves it from the same parse the tree was built from, never from
+labels, so two headings with the same name cannot be confused. It names one node in
+one version; it does not say that the two sides' nodes correspond to each other beyond
+what the change itself states.
 
 ### `location`
 
@@ -396,9 +524,15 @@ Future minor versions MAY introduce `"partial"` (one side resolved, one not).
 "text": { "old": string|null, "new": string|null }
 ```
 
-Plain text bodies. `null` on the side that doesn't exist (`added`: `old=null`;
-`removed`: `new=null`). Word-level inline diffs are NOT carried in the JSON;
-renderers compute them at render time.
+Plain text bodies, as a reader sees them, on both pipelines: an XML enumerator keeps
+its space (`(a) Of`, not the matcher's collapsed `(a)Of`), and PDF text is the printed
+words. Under `full_text_layout: "paragraphs"` it is exactly the slice of `full_text` at
+`full_text_span`; under `"numbered_lines"` that span also covers the line-number gutter,
+which `text` leaves out. `null` on the side that doesn't exist (`added`: `old=null`;
+`removed`: `new=null`). Word-level inline diffs are NOT carried in the JSON; renderers
+compute them at render time, over words, so whitespace alone draws no difference. A
+consumer reads `text` as it is; it does not choose by `versions.*.source` whether to look
+elsewhere.
 
 ### Money fields: none (removed in v3.0)
 
@@ -454,18 +588,33 @@ Object when `change_type == "moved"`, `null` otherwise.
 
 ```jsonc
 "move": {
-  "kind": "renumbered" | "relocated",
-  "old_label": string,   // present iff kind == "renumbered"
-  "new_label": string,   // present iff kind == "renumbered"
+  "kind": "renumbered" | "relocated_and_renumbered" | "relocated",
+  "old_label": string,   // present iff kind != "relocated"
+  "new_label": string,   // present iff kind != "relocated"
   "body_unchanged": boolean
 }
 ```
 
-- `"renumbered"` — the section's anchor identifier changed (e.g., `"Sec. 401"`
-  became `"Sec. 501"`). `old_label` and `new_label` carry the anchor texts.
-- `"relocated"` — the section moved within the bill's hierarchy without an
-  identifier change. Use the `path` arrays to describe the move; labels are
-  omitted.
+The differ that found the move decides its kind, by one rule on both pipelines, and
+records it on the change; the producer writes that answer here. Each side has a unit
+(section, subsection, title, division, …, or an unnumbered heading), a number (`401`,
+`(a)`, `IV`; none for a heading such as `FAMILY HOUSING, ARMY`), and a structural
+parent: the headings above it, titles with their numbers, with division labels left
+out and case and spacing ignored, so a re-lettered, recased or newly added division
+does not change it, and a move between two titles headed alike does.
+
+- `"renumbered"` — the same kind of unit, with a different number, under the same
+  structural parent (e.g., `"Sec. 401"` became `"Sec. 405"` in the same title).
+  `old_label` and `new_label` carry the two heading labels.
+- `"relocated_and_renumbered"` — the same kind of unit, with a different number,
+  under a different structural parent (e.g., `"SEC. 2"` became `"SEC. 202"` of
+  Division G, Title II). `old_label` and `new_label` carry the two heading labels;
+  use the `path` arrays to describe where it went.
+- `"relocated"` — anything else: the provision kept its number, changed kind of unit
+  (a title that became a section), or has no number on one side (a heading that only
+  wrapped differently across printed lines, or a section printed without one). Use the `path` arrays to describe the move;
+  labels are omitted. A heading reworded in place under the same number is
+  `"relocated"` too: no number changed.
 - `body_unchanged` — `true` when `text.old == text.new`. Renderers may use
   this to suppress redundant body display on pure renumber/relocate moves.
 

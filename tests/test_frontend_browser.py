@@ -167,10 +167,9 @@ def test_toc_group_caret_sits_on_header_line(chromium, tmp_path):
 def _render_grouped_report() -> str:
     """A full standalone report whose cards group under tree nodes (#172).
 
-    Hand-built canonical (the consumed contract) with a v2 tree and change
-    spans in one offset space, so the own-span join is live: one ADDED change
-    directly under TITLE I, two MODIFIED changes under its SALARIES /
-    OPERATIONS accounts. Exercises the real _JS.
+    Hand-built canonical (the consumed contract) whose changes name their v2
+    tree nodes (#785): one ADDED change directly under TITLE I, two MODIFIED
+    changes under its SALARIES / OPERATIONS accounts. Exercises the real _JS.
 
     The change types are load-bearing: the Structural filter selects on
     ``data-type !== 'modified'``, so this shape gives it exactly one survivor,
@@ -181,8 +180,9 @@ def _render_grouped_report() -> str:
     """
     from deltatrack.formatters.diff_html import format_diff_html
 
-    def node(label, level, span, children=()):
+    def node(node_id, label, level, span, children=()):
         return {
+            "id": node_id,
             "label": label,
             "level": level,
             "own_amounts": [],
@@ -190,12 +190,13 @@ def _render_grouped_report() -> str:
             "children": list(children),
         }
 
-    def change(i, start, end, change_type="modified"):
+    def change(i, start, end, change_type="modified", *, node_id):
         return {
             "id": f"c{i}",
             "change_type": change_type,
             "section_number": "",
             "path": {"v1": ["TITLE I"], "v2": ["TITLE I"]},
+            "node": {"v1": None if change_type == "added" else "v1.0", "v2": node_id},
             "location": None,
             "anchor_resolution": "resolved",
             # The appended token survives word_diff as ONE contiguous <ins>
@@ -207,12 +208,13 @@ def _render_grouped_report() -> str:
 
     tree_v2 = [
         node(
+            "v2.0",
             "TITLE I",
             "title",
             {"start": 0, "end": 7},
             [
-                node("SALARIES", "account", {"start": 10, "end": 50}),
-                node("OPERATIONS", "account", {"start": 60, "end": 100}),
+                node("v2.1", "SALARIES", "account", {"start": 10, "end": 50}),
+                node("v2.2", "OPERATIONS", "account", {"start": 60, "end": 100}),
             ],
         ),
     ]
@@ -225,9 +227,9 @@ def _render_grouped_report() -> str:
         },
         "summary": {"added": 1, "removed": 0, "modified": 2, "moved": 0},
         "changes": [
-            change(0, 2, 5, "added"),  # TITLE I direct
-            change(1, 20, 30),  # SALARIES
-            change(2, 70, 80),  # OPERATIONS
+            change(0, 2, 5, "added", node_id="v2.0"),  # TITLE I direct
+            change(1, 20, 30, node_id="v2.1"),  # SALARIES
+            change(2, 70, 80, node_id="v2.2"),  # OPERATIONS
         ],
         "full_text": {"v1": "x" * 120, "v2": "TITLE I\n" + "y" * 112},
         "tree": {"v1": [], "v2": tree_v2},
@@ -327,7 +329,7 @@ def test_counter_follows_full_bill_navigation(chromium, tmp_path):
     page = chromium.new_page(viewport={"width": 1280, "height": 900})
     page.goto(report.as_uri(), wait_until="domcontentloaded")
 
-    page.locator('.view-toggle__btn[data-view="full"]').click()
+    page.locator('.view-toggle [data-view="full"]').click()
     counter = page.locator("#nav-counter")
     assert counter.inner_text() == "0 / 3"
 
@@ -359,7 +361,7 @@ def test_counter_follows_full_bill_navigation(chromium, tmp_path):
 
     # The changes view keeps its own exact-match resolution: switching views
     # resets, and a card jump still lands on that card and not a neighbour.
-    page.locator('.view-toggle__btn[data-view="changes"]').click()
+    page.locator('.view-toggle [data-view="changes"]').click()
     assert counter.inner_text() == "0 / 3"
     page.locator("#change-2").click(position={"x": 5, "y": 5})
     assert counter.inner_text() == "3 / 3"
@@ -993,6 +995,8 @@ def test_report_tab_takes_its_colours_from_the_upload_page(live_url, chromium, t
     assert computed(".spinner", "borderLeftColor") == sentinels["--border"]
     assert computed(".spinner", "borderTopColor") == sentinels["--primary"]
     assert computed("body", "fontFamily") == sentinels["--font-sans"]
+    # Headings follow the shared base styles, whatever they set, as the upload page's do.
+    assert computed("h1", "fontFamily") == page.locator("h1").evaluate("el => getComputedStyle(el).fontFamily")
     tab.close()
     page.close()
 
@@ -1119,7 +1123,7 @@ def _render_find_report() -> str:
     merged_text, breaks = _find_fixture_texts()
     start = merged_text.index("vehicles")
     canonical = {
-        "schema_version": "3.1",
+        "schema_version": "3.0",
         "bill": {"type": "hr", "number": 8752, "congress": 118},
         "versions": {
             "v1": {"label": "Reported", "version_number": 1, "source": "pdf"},
@@ -1150,7 +1154,7 @@ def _open_full_bill(chromium, tmp_path, name="find_report.html"):
     report.write_text(_render_find_report(), encoding="utf-8")
     page = chromium.new_page(viewport={"width": 1280, "height": 900})
     page.goto(report.as_uri(), wait_until="domcontentloaded")
-    page.locator('.view-toggle__btn[data-view="full"]').click()
+    page.locator('.view-toggle [data-view="full"]').click()
     return page
 
 
@@ -1302,7 +1306,7 @@ def test_find_rejoins_a_word_broken_across_a_page(chromium, tmp_path):
     pages = merge_print_pages(read, read.evidence())
     whole_word, _ = pdf_full_text(pages)
     canonical = {
-        "schema_version": "3.1",
+        "schema_version": "3.0",
         "bill": {"type": "hr", "number": 8752, "congress": 118},
         "versions": {
             "v1": {"label": "Reported", "version_number": 1, "source": "pdf"},
@@ -1317,7 +1321,7 @@ def test_find_rejoins_a_word_broken_across_a_page(chromium, tmp_path):
     report.write_text(format_diff_html(canonical), encoding="utf-8")
     page = chromium.new_page(viewport={"width": 1280, "height": 900})
     page.goto(report.as_uri(), wait_until="domcontentloaded")
-    page.locator('.view-toggle__btn[data-view="full"]').click()
+    page.locator('.view-toggle [data-view="full"]').click()
 
     assert page.locator(".full-text-page").count() == 2, "fixture no longer prints a page seam"
     assert _find(page, "General Services to remain") == "1 / 1"
@@ -1486,3 +1490,28 @@ def test_csp_base_uri_none_ignores_base_tag(live_url, chromium):
         f"CSP enforcement is not working. currentSrc: {result_with_csp['currentSrc']}"
     )
     page.close()
+
+
+def test_a_copy_button_puts_its_prompt_on_the_clipboard(chromium, tmp_path):
+    """Each Copy button in the export dialog copies the prompt beside it.
+
+    The report's script finds these buttons by a selector, which moved when the buttons
+    took the shared `.button` class (#774). A selector that matches nothing raises no
+    error: every Copy button just does nothing, so only clicking one shows it works.
+    """
+    report = tmp_path / "copy.html"
+    report.write_text(_render_full_bill_report(), encoding="utf-8")
+    context = chromium.new_context()
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page = context.new_page()
+    page.goto(report.as_uri(), wait_until="domcontentloaded")
+
+    page.locator("#export-open").click()
+    item = page.locator(".prompt-item").nth(1)
+    button = item.get_by_role("button", name="Copy").element_handle()
+    button.click()
+
+    # The button reports success only once the write has resolved.
+    page.wait_for_function("b => b.textContent === 'Copied'", arg=button, timeout=2000)
+    assert page.evaluate("navigator.clipboard.readText()") == item.locator(".prompt-text").inner_text()
+    context.close()

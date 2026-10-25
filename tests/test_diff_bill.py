@@ -643,6 +643,10 @@ def synthetic_bills_dir(tmp_path) -> Path:
     return root
 
 
+#: What every synthetic version states about its bill: no `<official-title>`.
+SYNTHETIC_BILL = {"type": "hr", "number": 4366, "congress": 118, "title": None}
+
+
 def _run_compare(monkeypatch, *argv: str) -> None:
     monkeypatch.setattr(sys, "argv", ["diff_bill.py", "compare", *argv])
     main()
@@ -863,7 +867,7 @@ class TestCompareLegacyTwoPathForm:
         assert data["versions"]["v1"]["label"] == "reported-in-house"
         assert data["versions"]["v2"]["label"] == "enrolled-bill"
         assert data["bill"] == {"type": "hr", "number": 4366, "congress": 118, "title": None}
-        assert data["summary"] == {"modified": 1}  # zero-count and non-canonical keys do not ship (#706)
+        assert data["summary"] == {"modified": 1}
         assert [c["path"]["v2"] for c in data["changes"]] == [
             ["TITLE I\u2014DEPARTMENT OF DEFENSE", "Military construction, army"]
         ]
@@ -920,7 +924,7 @@ class TestCompareLegacyTwoPathForm:
         _run_compare(monkeypatch, *paths, "--format", "json", "--filter", "family housing")
         data = json.loads(capsys.readouterr().out)
         assert data["changes"] == []
-        assert data["summary"] == {}  # empty change set, so no non-zero key ships (#706)
+        assert data["summary"] == {}
 
     def test_financial_still_reaches_cmd_compare_and_only_filters(self, tmp_path, monkeypatch, capsys):
         """`--financial` filters, and after #693 that is the whole of what it does.
@@ -990,8 +994,10 @@ class TestCompareLegacyTwoPathForm:
         )
         raw = out.read_text() if out.exists() else capsys.readouterr().out
         data = json.loads(raw)
-        assert data["versions"]["v1"] == {"label": "reported-in-house", "version_number": 1, "source": "xml"}
-        assert data["versions"]["v2"] == {"label": "enrolled-bill", "version_number": 6, "source": "xml"}
+        assert data["versions"] == {
+            "v1": {"label": "reported-in-house", "version_number": 1, "source": "xml", "bill": SYNTHETIC_BILL},
+            "v2": {"label": "enrolled-bill", "version_number": 6, "source": "xml", "bill": SYNTHETIC_BILL},
+        }
 
     def test_a_flag_between_the_paths_still_takes_effect(self, synthetic_bills_dir, monkeypatch, capsys):
         """Accepting the ordering is not enough, the flag has to still be applied.
@@ -1119,9 +1125,11 @@ class TestCompareVersionAddressableForm:
             "json",
         )
         data = json.loads(capsys.readouterr().out)
-        assert data["versions"]["v1"] == {"label": "reported-in-house", "version_number": 1, "source": "xml"}
-        assert data["versions"]["v2"] == {"label": "enrolled-bill", "version_number": 6, "source": "xml"}
-        assert data["summary"] == {"modified": 1}  # zero-count and non-canonical keys do not ship (#706)
+        assert data["versions"] == {
+            "v1": {"label": "reported-in-house", "version_number": 1, "source": "xml", "bill": SYNTHETIC_BILL},
+            "v2": {"label": "enrolled-bill", "version_number": 6, "source": "xml", "bill": SYNTHETIC_BILL},
+        }
+        assert data["summary"] == {"modified": 1}
 
     def test_the_ordinals_pick_the_versions_named(self, synthetic_bills_dir, monkeypatch, capsys):
         """The middle version, so "resolved" cannot mean "took the first and last file"."""
