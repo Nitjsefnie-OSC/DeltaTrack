@@ -23,54 +23,54 @@
     }
   },
   "113-hr-3547/4_engrossed-amendment-senate->5_engrossed-amendment-house": {
-    "bytes": 5778704,
+    "bytes": 5811353,
     "changes": 2811,
-    "sha256": "360524a1b3a367f19e461e010fd6bbf8a95766e1889c271e37bc4aabb486e646",
+    "sha256": "8a97e725eaff84934bfd8257f5679225c79b5df3cb67abe7a1fea3b2327ea7ad",
     "summary": {
       "added": 2810,
       "moved": 1
     }
   },
   "113-hr-3547/5_engrossed-amendment-house->6_enrolled-bill": {
-    "bytes": 5392818,
+    "bytes": 5439806,
     "changes": 8,
-    "sha256": "85bad066c986f9b66541c51a6c673a333d3073daa7d3e6c79a09cc4ea7e28be8",
+    "sha256": "16c0b122984e4f02257396ffad6e8278c6a44fa90b46b258b0ee5492446765d6",
     "summary": {
       "added": 3,
       "modified": 5
     }
   },
   "113-hr-83/6_engrossed-amendment-house->7_enrolled-bill": {
-    "bytes": 5710910,
+    "bytes": 5750564,
     "changes": 9,
-    "sha256": "877fdbdf69d304919f81dabc372feb8f694da1d2c71452a6029ec761b8d2aad6",
+    "sha256": "45a860ef0fe608b4ebc3bb8330faa4c5caa9a39f46fe00785c4a8f7ac872b79a",
     "summary": {
       "added": 3,
       "modified": 6
     }
   },
   "114-hr-2029/1_reported-in-house->3_referred-in-senate": {
-    "bytes": 284065,
+    "bytes": 284537,
     "changes": 23,
-    "sha256": "1a967f45f63f31a30069d6de1d113038835b2c4d3363680147f1ca7b7a24d612",
+    "sha256": "d5dbdeab9be69e42468cfc3ac02be5f635373daad6dc30079e206077a26e2cb0",
     "summary": {
       "added": 15,
       "modified": 8
     }
   },
   "114-hr-2029/3_referred-in-senate->4_reported-in-senate": {
-    "bytes": 513544,
+    "bytes": 514016,
     "changes": 152,
-    "sha256": "49abf477aacb0c9607773275e8173bb74f3bf4150ef17ccc22b9dd6ecbdb301a",
+    "sha256": "5aab312bd879886d4cb6ef2ca0c22f537531d46ce41eedeb99a44b9b695d2e6f",
     "summary": {
       "added": 150,
       "modified": 2
     }
   },
   "114-hr-2029/4_reported-in-senate->5_engrossed-amendment-senate": {
-    "bytes": 580943,
+    "bytes": 581208,
     "changes": 206,
-    "sha256": "195cbce5626c907fa89586941c0e7d63e1dbb5c2126d6090deedb239364fa2ae",
+    "sha256": "cd67858e1eaec5572504fc8ba18d523cf48f649a483e9c69280e67eea113bd52",
     "summary": {
       "added": 35,
       "modified": 4,
@@ -79,9 +79,9 @@
     }
   },
   "114-hr-2029/5_engrossed-amendment-senate->6_engrossed-amendment-house": {
-    "bytes": 7996256,
+    "bytes": 8028362,
     "changes": 3752,
-    "sha256": "56eba668b2481d8570d12faea39db9e378876f48a00bea584388abc928fcf1b3",
+    "sha256": "6467367ae2d4033a58d5026b9d618722cacc6286b04acf23d2cd9fabfcaf76a3",
     "summary": {
       "added": 3618,
       "modified": 39,
@@ -90,18 +90,18 @@
     }
   },
   "114-hr-2029/6_engrossed-amendment-house->7_enrolled-bill": {
-    "bytes": 7212169,
+    "bytes": 7256641,
     "changes": 6,
-    "sha256": "2b6c49e4f7f2ee63f623b4965646423b8f26e399e14da1664238a831c86ef121",
+    "sha256": "b3302340365ca4b44ecc6d629c27322a05c42ed28f03e80d562df3730c830470",
     "summary": {
       "added": 3,
       "modified": 3
     }
   },
   "115-hr-5895/1_reported-in-house->2_engrossed-in-house": {
-    "bytes": 760890,
+    "bytes": 772891,
     "changes": 302,
-    "sha256": "d08a2febf59f9c61d54f853098bc5535987e6b92ea94acdebf38a4516e243e76",
+    "sha256": "b32bd4fbc722fb1de9ba3aba62770ae2750bce86c1cc0e616a6d6c675425dbac",
     "summary": {
       "added": 281,
       "modified": 20,
@@ -109,9 +109,9 @@
     }
   },
   "115-hr-5895/2_engrossed-in-house->4_engrossed-amendment-senate": {
-    "bytes": 1279824,
+    "bytes": 1300641,
     "changes": 444,
-    "sha256": "ac855ca34266b7c3ef0e6afe8126d8a5505b34fc04143f4563782d3fda54bf86",
+    "sha256": "22003a3b983a82a967a82792dcd8f17569a3c3e79cae237dd8ccbe42c5800359",
     "summary": {
       "added": 165,
       "modified": 96,
@@ -120,9 +120,9 @@
     }
   },
   "115-hr-5895/4_engrossed-amendment-senate->5_enrolled-bill": {
-    "bytes": 1147415,
+    "bytes": 1162620,
     "changes": 304,
-    "sha256": "f89519b71546189793d75ace5adc562dc5b0d4d680702f71c30631f14afa22c8",
+    "sha256": "3ad3672436fb3f121e0b95d9d0227152972526130e47c2d5e33d555f85034cae",
     "summary": {
       "added": 68,
       "modified": 96,
@@ -131,9 +131,9 @@
     }
   },
   "117-hr-2471/1_introduced-in-house->6_enrolled-bill": {
-    "bytes": 9101010,
+    "bytes": 9170718,
     "changes": 4015,
-    "sha256": "73764274a4c4bdef9cb79e54ccfddb5bc913dcca21d705944cc999048f254298",
+    "sha256": "86d6a48b9048ff57c5a5cf4853f7c4e46d6f8b741667141c8bce491a4d14e7f0",
     "summary": {
       "added": 3997,
       "modified": 1,
@@ -142,9 +142,9 @@
     }
   },
   "117-hr-4502/1_reported-in-house->2_engrossed-in-house": {
-    "bytes": 3903303,
+    "bytes": 3929591,
     "changes": 1415,
-    "sha256": "86532e91ce1f4a315d4ad9b60fd92d6aa50e2d26dea5005e1c2a28d3d6c1c67e",
+    "sha256": "824b4517bfb83839eb298cf60f534953c00122b9af9ea00312956511631ccdb5",
     "summary": {
       "added": 1366,
       "modified": 48,
@@ -162,9 +162,9 @@
     }
   },
   "118-hr-2882/4_engrossed-amendment-senate->5_engrossed-amendment-house": {
-    "bytes": 3674724,
+    "bytes": 3716772,
     "changes": 1842,
-    "sha256": "14611368598803185964ae81a748ee239e9014760571d5310f56520d7ea89cc3",
+    "sha256": "a0f119c2f20f724dfec005c2f07c9008ac6780a861b42203ba1fde70e71ca439",
     "summary": {
       "added": 1838,
       "modified": 1,
@@ -172,9 +172,9 @@
     }
   },
   "118-hr-4366/1_reported-in-house->2_engrossed-in-house": {
-    "bytes": 369953,
+    "bytes": 370491,
     "changes": 25,
-    "sha256": "7defdf3016030129749e6d989f4fcac28194a1bbc8b27e339ed4506cafd1e1cb",
+    "sha256": "f1f991e4de1f1dc5dca3456ad0e605fff2584df5c34fbbe438201500758e2cec",
     "summary": {
       "added": 7,
       "modified": 17,
@@ -182,15 +182,15 @@
     }
   },
   "118-hr-4366/2_engrossed-in-house->3_placed-on-calendar-senate": {
-    "bytes": 331936,
+    "bytes": 332416,
     "changes": 0,
-    "sha256": "87855bf7010556d3406c5ee56e8c43251fda988670807e3e5da3dc9fb566a6b7",
+    "sha256": "897e4f19cb312858698833971e01bed763819271750bc338f5cf9eb27f02d1f8",
     "summary": {}
   },
   "118-hr-4366/3_placed-on-calendar-senate->4_engrossed-amendment-senate": {
-    "bytes": 1895255,
+    "bytes": 1896709,
     "changes": 703,
-    "sha256": "956b0b5184133099830660c5908d14305b51efde4fa013467b395b42cf1e2cd5",
+    "sha256": "ec67ae4a8309e2524f5910e05b706740e78bdc6adc8625c6bade6617bb804950",
     "summary": {
       "added": 561,
       "modified": 48,
@@ -199,9 +199,9 @@
     }
   },
   "118-hr-4366/4_engrossed-amendment-senate->5_engrossed-amendment-house": {
-    "bytes": 4469999,
+    "bytes": 4496122,
     "changes": 1199,
-    "sha256": "9dc68a49e88401de532855a0b213314accc06e8cc734a6ecbf5848a3d2832717",
+    "sha256": "ed23c508255ef588cea3a4b2e2deb3c4f7d5923454866fa36f135fb15054c80c",
     "summary": {
       "added": 823,
       "modified": 187,
@@ -210,9 +210,9 @@
     }
   },
   "118-hr-4366/5_engrossed-amendment-house->6_enrolled-bill": {
-    "bytes": 3300744,
+    "bytes": 3340666,
     "changes": 3,
-    "sha256": "6bb8494332623493f17d8a9915cf34ac6b18afc26cc4c8477d80ae7bbf5915b1",
+    "sha256": "96ba7417e8c5ca1628395d94c94216d2040d501ff1f0f9af942769e569b61851",
     "summary": {
       "added": 3
     }
@@ -229,9 +229,9 @@
     }
   },
   "118-hr-8774/1_reported-in-house->2_engrossed-in-house": {
-    "bytes": 595935,
+    "bytes": 596415,
     "changes": 31,
-    "sha256": "e6cfcb32b340ce2794ecd4a98f3c6afc185e29952be3012a1a25c45f2d8b0ed0",
+    "sha256": "523d830373df420c2057c828d0d137449c5bb75255bcff5d9aa02831486836ce",
     "summary": {
       "added": 7,
       "modified": 21,
