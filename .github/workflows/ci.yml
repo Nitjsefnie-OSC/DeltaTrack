@@ -311,6 +311,8 @@ jobs:
         run: >
           uv run --locked --project "$GITHUB_WORKSPACE" pytest -v -m slow
           "$GITHUB_WORKSPACE/tests/test_structure_tree.py"
+          "$GITHUB_WORKSPACE/tests/test_xml_provision_headings.py"
+          "$GITHUB_WORKSPACE/tests/test_pdf_wrapped_accounts.py"
           "$GITHUB_WORKSPACE/tests/test_diff_bill.py"
           "$GITHUB_WORKSPACE/tests/test_pdf_xml_prose_recall.py"
           "$GITHUB_WORKSPACE/tests/test_report_from_document.py"
@@ -322,6 +324,7 @@ jobs:
           "$GITHUB_WORKSPACE/tests/test_pdf_watermark_recall.py"
           "$GITHUB_WORKSPACE/tests/test_formatters_text_serializer.py"
           "$GITHUB_WORKSPACE/tests/test_pdf_xml_withheld_recall.py"
+          "$GITHUB_WORKSPACE/tests/test_summary_parity.py"
           "$GITHUB_WORKSPACE/tests/test_cli_api_parity.py"
       - name: Run remaining slow suites (shard 2 of 2)
         if: ${{ !cancelled() && matrix.shard == 2 }}
