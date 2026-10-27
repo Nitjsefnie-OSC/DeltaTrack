@@ -78,6 +78,26 @@ Grouping headers (`ADMINISTRATIVE PROVISIONS`, `GENERAL PROVISIONS`,
 `SPENDING REDUCTION ACCOUNT`) are the bridge: header-only money-tree nodes whose
 *body* is a run of provisions-tree sections.
 
+### Conservative recovery of provision headings
+
+Inside a title or its structural containers, a header-only `appropriations-small`
+immediately before a numbered section is shown above that section and its emitted
+subsections. Its scope stops there. The flat XML does not establish that later
+sibling sections share that heading: in H.R. 4366's House-engrossed text,
+`SPENDING REDUCTION ACCOUNT` introduces SEC. 420, not SEC. 421's VA restriction.
+Subsequent provisions can therefore remain shallower than the print.
+
+Recovered headings carry per-version source-occurrence keys through the text
+serializer and sidecar tree. Identical labels remain separate heading nodes with
+their own jump targets, rather than merging by name. These keys are internal,
+not cross-version matching keys; `match_path`, content order and observation
+ordinals are unchanged. The canonical schema and renderer are unchanged.
+
+This recovery is deliberately partial. Same-level account-heading chains (NATO,
+FDA), headings inside a preceding section, split titles, deep container labels,
+and header-only sections remain separate work from #739 and #525. A parenthetical
+or a heading with its own body is not a recovered provision heading.
+
 ## Glossary
 
 | Term | Role | Bill-DTD tag | PDF signal |
