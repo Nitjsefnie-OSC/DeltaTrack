@@ -64,7 +64,7 @@ Necessary tests and refreshed artifacts travel with the behavior they protect. E
 
 ### NATO agency scope: bounded finding, not a repaired hierarchy
 
-Investigation starts independently from merged `develop` at `a4ca7944`. On H.R. 4366, the current breadcrumb carries `NORTH ATLANTIC TREATY ORGANIZATION` over `SECURITY INVESTMENT PROGRAM`, then Base Closure and both Army housing accounts. Exact printed page:line starts in the committed PDFs:
+Bounded finding: [#858](https://github.com/civictechdc/DeltaTrack/pull/858), independently based on merged `develop` at `a4ca7944`. Lint, formatting, fast, fail-closed browser and all CI slow gates, including external validation, pass; the live-network govinfo gate is excluded as in CI. On H.R. 4366, the current breadcrumb carries `NORTH ATLANTIC TREATY ORGANIZATION` over `SECURITY INVESTMENT PROGRAM`, then Base Closure and both Army housing accounts. Exact printed page:line starts in the committed PDFs:
 
 | Version filename | NATO / Security Investment | Base Closure | Housing Construction, Army | Housing Operation and Maintenance, Army |
 |---|---|---|---|---|
@@ -143,7 +143,7 @@ A new substantive review pass must name a plausible, currently untested failure 
 
 ## Next turn
 
-**Owner: Will accepts or redirects the bounded NATO finding; implementing agent resumes a separately selected slice.** Recommended next action: inspect remaining XML container-display recovery against explicit source nesting, retaining occurrence identity. Do not tune the ambiguous PDF NATO breadcrumb or reopen #857 without concrete new evidence. NATO/FDA XML chains, other PDF heading passes and vehicle fixtures remain deferred, not completed by this finding. Financial readiness is unchanged. No original PR was merged or closed by this investigation; do not infer cleanup authority from their current states.
+**Owner: Will reviews [#858](https://github.com/civictechdc/DeltaTrack/pull/858) and accepts or redirects the bounded NATO finding; implementing agent resumes a separately selected slice.** Recommended next action: inspect remaining XML container-display recovery against explicit source nesting, retaining occurrence identity. Do not tune the ambiguous PDF NATO breadcrumb or reopen #857 without concrete new evidence. NATO/FDA XML chains, other PDF heading passes and vehicle fixtures remain deferred, not completed by this finding. Financial readiness is unchanged. No original PR was merged or closed by this investigation; do not infer cleanup authority from their current states.
 
 This is the single authoritative repository copy, committed in `plans/` despite that directory's general ignore rule. The prior ignored primary-checkout copy has been moved here, not duplicated. Retire the plan only when its remaining outcomes are delivered or explicitly disposed of.
 
