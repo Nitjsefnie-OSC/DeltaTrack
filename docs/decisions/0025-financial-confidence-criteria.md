@@ -1,6 +1,6 @@
 # 25. Bring dollar figures back only when each one is typed and its type agrees with an official source
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-04
 
 ## Context
