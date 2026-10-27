@@ -453,6 +453,7 @@ CI_SLOW_MODULES = (
     "tests/test_bill_tree.py",
     "tests/test_structure_tree.py",
     "tests/test_xml_provision_headings.py",
+    "tests/test_pdf_wrapped_accounts.py",
     "tests/test_diff_bill.py",
     "tests/test_pdf_compare.py",
     "tests/test_financial_diff.py",
