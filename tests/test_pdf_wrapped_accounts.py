@@ -73,7 +73,6 @@ def test_source_supported_wrap_is_one_account_at_its_first_line():
     "options",
     [
         {"caps": True},  # title-case agency over even-cap account, even when nearly full
-        {"upper_width": 200},  # next word fits: intentional separate heading
         {"caps": None},  # no typography evidence
         {"missing": True},  # no geometry evidence
         {"offset": 25},  # not centered: do not absorb heading-shaped indented text
@@ -81,6 +80,21 @@ def test_source_supported_wrap_is_one_account_at_its_first_line():
 )
 def test_separate_or_ambiguous_headings_keep_the_existing_reading(options):
     anchors = extract_anchors(_pages(**options))
+    assert [(a.line_number, a.kind, a.text) for a in anchors if a.line_number >= 3] == [
+        (3, "agency", "LONG PRINTED ACCOUNT NAME,"),
+        (4, "account", "CONTINUATION"),
+    ]
+
+
+@pytest.mark.parametrize("unrelated_width", [320, 100, None])
+def test_short_headings_stay_separate_regardless_of_unrelated_headings(unrelated_width):
+    page = _pages(upper_width=200)[0]
+    lines = tuple(
+        _heading(1, "OTHER HEADING", unrelated_width, 40) if ln.line_number == 1 else ln
+        for ln in page.lines
+        if ln.line_number != 1 or unrelated_width is not None
+    )
+    anchors = extract_anchors([replace(page, lines=lines)])
     assert [(a.line_number, a.kind, a.text) for a in anchors if a.line_number >= 3] == [
         (3, "agency", "LONG PRINTED ACCOUNT NAME,"),
         (4, "account", "CONTINUATION"),

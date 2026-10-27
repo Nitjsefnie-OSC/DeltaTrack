@@ -60,6 +60,7 @@ class SizeBands:
 # Size comparison tolerance (points). Per-line medians wobble ~0.1pt; eps must
 # exceed that rounding granularity. Body↔heading separation must exceed 2·eps.
 _SIZE_EPS = 0.3
+_CENTERED_HEADING_INSET_MIN = 10.0
 # A document needs at least this fraction of its numbered lines to carry an
 # attached glyph size before we trust size-based detection; below it no account
 # anchors are emitted at all (a partial join would silently drop headings, and
@@ -528,8 +529,7 @@ def _account_anchors_by_size(pages: list[Page], bands: SizeBands) -> list[Anchor
             return True
         return abs(line.glyph_size - bands.body) <= _SIZE_EPS
 
-    # Available heading width is the body column less the smallest observed centered
-    # heading inset. Adapted from Matt Zamora's #734; no new PDFium calls are needed.
+    # Body geometry defines the column independently of the headings being judged.
     edges = {}
     for page in pages:
         body = [ln.geom for ln in page.lines if ln.geom is not None and _has_lowercase(ln.text)]
@@ -542,10 +542,8 @@ def _account_anchors_by_size(pages: list[Page], bands: SizeBands) -> list[Anchor
             return None
         left, right = edges[page_no]
         li, ri = g.content_left - left, right - g.content_right
-        return min(li, ri) if min(li, ri) >= 10 and abs(li - ri) <= 6 else None
+        return min(li, ri) if min(li, ri) >= _CENTERED_HEADING_INSET_MIN and abs(li - ri) <= 6 else None
 
-    insets = [inset for p, ln in flat if is_account_candidate(ln) and (inset := centered_inset(p, ln)) is not None]
-    heading_inset = min(insets) if insets else None
     # A repeated standalone heading is stronger evidence than a possible soft wrap.
     lone = Counter(
         ln.text.strip()
@@ -564,7 +562,7 @@ def _account_anchors_by_size(pages: list[Page], bands: SizeBands) -> list[Anchor
         existing segmentation. Same-style stacks remain ambiguous, not guessed from names.
         """
         start = leaf_idx
-        while start > 0 and heading_inset is not None:
+        while start > 0:
             p, upper = flat[start - 1]
             q, lower = flat[start]
             if (
@@ -588,7 +586,9 @@ def _account_anchors_by_size(pages: list[Page], bands: SizeBands) -> list[Anchor
                 + lower.geom.first_word_right
                 - lower.geom.content_left
             )
-            if needed <= right - left - 2 * heading_inset:
+            # Use the entire eligible centered-heading region, not an observed line's
+            # inset: a candidate cannot narrow this bound to certify its own wrap.
+            if needed <= right - left - 2 * _CENTERED_HEADING_INSET_MIN:
                 break
             start -= 1
         return start
