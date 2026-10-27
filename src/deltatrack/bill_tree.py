@@ -60,6 +60,18 @@ class BillNode:
     # the comment in diff_bill._match_collision_group. Nothing reads it yet.
     body_index: int = 0
 
+    # Per-version source occurrences for recovered display-only ancestors. Empty entries
+    # retain the existing path-prefix identity; labels alone cannot identify a repeated
+    # provision heading. These keys never participate in cross-version matching.
+    display_path_occurrences: tuple[str, ...] = ()
+
+    @property
+    def display_key(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (label, self.display_path_occurrences[i] if self.display_path_occurrences else "")
+            for i, label in enumerate(self.display_path)
+        )
+
 
 def amount_text(node: BillNode) -> str:
     """The text every money view extracts a node's dollar amounts from (#365).
@@ -1043,6 +1055,7 @@ def _walk_structural_children(
     nodes: list[BillNode],
     *,
     _in_structural_container: bool = False,
+    _heading_ordinals: dict[int, int] | None = None,
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """Walk children of a structural element, dispatching by tag.
 
@@ -1053,6 +1066,7 @@ def _walk_structural_children(
     - First container level: header -> current_major
     - Deeper levels: header -> current_intermediate
     """
+    provision_heading: ET.Element | None = None
     for child in parent:
         tag = child.tag
 
@@ -1067,9 +1081,19 @@ def _walk_structural_children(
                 pending_header,
                 nodes,
             )
+            header = get_header_text(child)
+            provision_heading = (
+                child
+                if tag == "appropriations-small"
+                and header
+                and not _PARENTHETICAL_RE.match(header)
+                and not _extract_appropriations_text(child)
+                else None
+            )
 
         elif tag == "section":
             pending_header = None
+            start = len(nodes)
             _process_section_element(
                 child,
                 title_header,
@@ -1079,8 +1103,27 @@ def _walk_structural_children(
                 prev_name,
                 nodes,
             )
+            if provision_heading is not None:
+                # Adjacency establishes only the section introduced by this heading,
+                # not the scope of later sibling sections (ADR 0018; #739 review).
+                heading = get_header_text(provision_heading)
+                ordinal = (_heading_ordinals or {})[id(provision_heading)]
+                for i in range(start, len(nodes)):
+                    node = nodes[i]
+                    if node.tag not in ("section", "subsection") or not node.section_number:
+                        continue
+                    at = len(node.display_path) - (2 if node.tag == "subsection" else 1)
+                    path = node.display_path
+                    occurrences = ("",) * len(path)
+                    nodes[i] = replace(
+                        node,
+                        display_path=(*path[:at], heading, *path[at:]),
+                        display_path_occurrences=(*occurrences[:at], f"xml-heading-{ordinal}", *occurrences[at:]),
+                    )
+            provision_heading = None
 
         elif tag in _STRUCTURAL_TAGS:
+            provision_heading = None
             container_header = get_header_text(child)
             # Scope context: container changes don't leak to parent siblings
             saved_major = current_major
@@ -1112,11 +1155,14 @@ def _walk_structural_children(
                 None,
                 nodes,
                 _in_structural_container=True,
+                _heading_ordinals=_heading_ordinals,
             )
             current_major = saved_major
             current_intermediate = saved_intermediate
             prev_name = saved_prev
             pending_header = saved_pending
+        else:
+            provision_heading = None
 
     return current_major, current_intermediate, prev_name, pending_header
 
@@ -1125,6 +1171,8 @@ def walk_title(
     title_element: ET.Element,
     title_header: str,
     division: Division,
+    *,
+    _heading_ordinals: dict[int, int] | None = None,
 ) -> list[BillNode]:
     """Walk a <title> element, tracking flat-sibling context.
 
@@ -1147,6 +1195,11 @@ def walk_title(
         None,
         None,
         nodes,
+        _heading_ordinals=(
+            _heading_ordinals
+            if _heading_ordinals is not None
+            else {id(el): ordinal for ordinal, el in enumerate(title_element.iter())}
+        ),
     )
     return nodes
 
@@ -1520,7 +1573,16 @@ def normalize_bill(xml_path: Path) -> BillTree:
         body_nodes = _walk_one_body(body, index)
         # Stamped here rather than threaded through the ~10 BillNode construction sites
         # in the walk, so a new site cannot silently ship without it.
-        all_nodes.extend(replace(node, body_index=index) for node in body_nodes)
+        all_nodes.extend(
+            replace(
+                node,
+                body_index=index,
+                display_path_occurrences=tuple(
+                    f"{index}:{key}" if key else "" for key in node.display_path_occurrences
+                ),
+            )
+            for node in body_nodes
+        )
 
     return BillTree(congress, bill_type, bill_number, version, all_nodes, official_title)
 
@@ -1578,6 +1640,7 @@ def _amendment_opening_clause(body: ET.Element, body_index: int = 0) -> list[Bil
 def _walk_one_body(body: ET.Element, body_index: int = 0) -> list[BillNode]:
     """Every content node under one top-level body, in document order."""
     all_nodes: list[BillNode] = _amendment_opening_clause(body, body_index)
+    heading_ordinals = {id(el): ordinal for ordinal, el in enumerate(body.iter())}
 
     # Check for divisions first
     divisions = body.findall("division")
@@ -1629,10 +1692,12 @@ def _walk_one_body(body: ET.Element, body_index: int = 0) -> list[BillNode]:
 
                 for title in child.findall("title"):
                     title_header = build_title_label(title)
-                    all_nodes.extend(walk_title(title, title_header, current_division))
+                    all_nodes.extend(
+                        walk_title(title, title_header, current_division, _heading_ordinals=heading_ordinals)
+                    )
             elif child.tag == "title":
                 title_header = build_title_label(child)
-                all_nodes.extend(walk_title(child, title_header, current_division))
+                all_nodes.extend(walk_title(child, title_header, current_division, _heading_ordinals=heading_ordinals))
         return all_nodes
 
     # Check for titles directly under body
@@ -1641,7 +1706,7 @@ def _walk_one_body(body: ET.Element, body_index: int = 0) -> list[BillNode]:
         all_nodes.extend(walk_body_sections(body))
         for title in titles:
             title_header = build_title_label(title)
-            all_nodes.extend(walk_title(title, title_header, NO_DIVISION))
+            all_nodes.extend(walk_title(title, title_header, NO_DIVISION, _heading_ordinals=heading_ordinals))
         return all_nodes
 
     # Fallback: sections directly under body
