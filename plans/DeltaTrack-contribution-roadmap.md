@@ -1,6 +1,6 @@
 # DeltaTrack: contribution recovery and financial readiness
 
-Living work plan · Updated October 26, 2026 · Maintainer: Will Hea
+Living work plan · Updated October 27, 2026 · Maintainer: Will Hea
 
 ## Purpose
 
@@ -11,11 +11,11 @@ This is a navigation and handoff document, not an implementation specification. 
 ## Where we are
 
 - [#796, financial-readiness ADR 0025](https://github.com/civictechdc/DeltaTrack/pull/796) merged at `45d64e9d`. Adoption bookkeeping is completed separately in `f3e80ffe`: Accepted status and both indexes, without changing criteria or authorizing financial displays.
-- Matt’s source contributions are [#734, PDF headings](https://github.com/civictechdc/DeltaTrack/pull/734), [#736, financial ledger and views](https://github.com/civictechdc/DeltaTrack/pull/736), and [#739, XML headings](https://github.com/civictechdc/DeltaTrack/pull/739). #734 and #736 remain open; #739 was already closed upstream without a merge when this PDF turn began. Their Git ancestry does not define the replacement architecture.
-- The first XML successor has landed. The next PDF slice is deliberately narrower than #734's heading passes: source-supported comma-ended wrapped account names. Broader XML and PDF recovery remains deferred.
+- Matt’s source contributions are [#734, PDF headings](https://github.com/civictechdc/DeltaTrack/pull/734), [#736, financial ledger and views](https://github.com/civictechdc/DeltaTrack/pull/736), and [#739, XML headings](https://github.com/civictechdc/DeltaTrack/pull/739). #734 and #739 are closed upstream without merging; #736 remains open. Closure does not integrate or dispose of their remaining contributions. Their Git ancestry does not define the replacement architecture.
+- The bounded XML provision-heading and PDF comma-wrap successors have landed. Investigation of NATO carry-over found no defensible scope boundary in the inspected PDF source; no agency-scope repair is adopted. Broader XML and PDF recovery remains deferred.
 - Financial research has advanced: #854 fixed the notebook’s Title I shortfall and same-named account merging; #845 improved selection and measurement. Neither establishes all-figure financial readiness.
 - [#856, bounded XML provision headings](https://github.com/civictechdc/DeltaTrack/pull/856) merged as `68946586`, containing `ff5d98f7`. The PDF branch starts from that `develop` commit, not the XML feature branch. Open successors were checked before implementation and again before delivery; none duplicates this slice.
-- [#857, source-supported comma-wrapped PDF account names](https://github.com/civictechdc/DeltaTrack/pull/857) is open against `develop`. Initial implementation: `bf148f6a`, with carried typography authored by Matt in `352d0825` and his coauthor credit on the adaptation. Review of `7a511be` identified the sparse-layout width defect addressed below. Maintainer review remains the integration gate.
+- [#857, source-supported comma-wrapped PDF account names](https://github.com/civictechdc/DeltaTrack/pull/857) merged as `a4ca7944`, containing closure-reviewed `025d2248`. Matt's typography authorship in `352d0825` and coauthor credit on the adaptations remain in `develop`'s history. Its closure review is complete; the agency-scope investigation below does not reopen it.
 
 ## Outcomes to track
 
@@ -23,7 +23,7 @@ This is a navigation and handoff document, not an implementation specification. 
 |---|---|---|---|---|
 | A | Agreed financial acceptance boundaries | Adoption recorded separately; no financial shipping approval | Apply the accepted criteria to future financial proposals | #796; `f3e80ffe` |
 | B | Useful XML structure work integrated | Bounded provision-heading successor merged | Recover remaining supported XML shapes independently; source PR closure did not integrate them | Source: #739; successor #856 |
-| C | Useful PDF structure work integrated | Focused comma-wrap successor open against current develop | Will reviews #857, then choose the next source-supported scope repair after integration | Source: #734; successor #857 at `bf148f6a` |
+| C | Useful PDF structure work integrated | Comma-wrap successor merged; NATO scope investigation bounded without a repair | Accept the recorded limitation or supply new structural evidence before revisiting scope | Source: #734; successor #857 at `025d2248`, merged as `a4ca7944`; finding below |
 | D | Trustworthy individual financial figures | Existing research provides bounded evidence | Implement and validate one complete mixed-figure example; use what it reveals to choose the next slice | Sources: #736, #845, #854; stage 1 not demonstrated |
 | E | Trustworthy financial totals | Existing rollup research exposes unresolved accounting and scope issues | After per-figure work clarifies the inputs, choose a bounded aggregation claim and test it independently | ADR stage 2; not ready |
 | F | Meaningful cross-version financial changes | Acceptance decision intentionally deferred | After stage 1 ships, settle the paired-change claim and its criteria, then plan implementation | ADR stage 3; not ready |
@@ -48,7 +48,7 @@ For PDF, retain #734's glyph-size case-pattern reader, gap-aware first-word meas
 
 The width bound is the full body-defined region eligible under the detector's existing minimum centered-heading inset, not the width of observed headings. Review of `7a511be` reproduced a sparse-layout false join: removing an unrelated wide heading let the short candidate define its own available width. A narrower unrelated heading also failed, so merely excluding the candidate was not a safe remedy. The correction keeps the existing inset eligibility criterion and uses its entire allowed region; heading candidates cannot shrink that bound. The short-heading control now covers wide, narrow and absent unrelated headings, consolidating the earlier negative case. Restoring the faulty calculation was observed to fail the narrow and absent cases; the corrected module passes, including the real H.R. 4366 source-span and downstream-reference control.
 
-The correction's ordered anchor-and-breadcrumb audit found no changes on any committed PDF versus the reviewed head. No real recovery result, PDF canonical baseline or containment-count expectation is changed to accommodate this constructed-input fix. All XML pairing digests and source hashes also remain unchanged; only their derived parser-revision stamps are refreshed. Lint, formatting, fast tests, fail-closed browser tests and every CI slow gate were rerun successfully after the correction; the live-network govinfo gate remains excluded as in CI. This fixes the width-evidence defect without reopening the broader heading design or changing the deferred scope. The PR carries the red/green and final-check results; the next action remains maintainer review, not another unbounded heading pass.
+The correction's ordered anchor-and-breadcrumb audit found no changes on any committed PDF versus the reviewed head. No real recovery result, PDF canonical baseline or containment-count expectation is changed to accommodate this constructed-input fix. All XML pairing digests and source hashes also remain unchanged; only their derived parser-revision stamps are refreshed. Lint, formatting, fast tests, fail-closed browser tests and every CI slow gate were rerun successfully after the correction; the live-network govinfo gate remains excluded as in CI. This fixes the width-evidence defect without reopening the broader heading design or changing the deferred scope. The merged PR carries the red/green and final-check results.
 
 The approach changed after a full-corpus audit: matching typography plus fullness alone joined the ambiguous Members’ Representational Allowances / Including Members’ Clerk Hire stack. Requiring continuation punctuation leaves that boundary alone. The narrower repair recovers the demonstrated H.R. 4366 p.10 lines 13–14 as one account at line 13, instead of a fake parent and an ARMY child. Across the committed PDFs, all newly recovered account labels match normalized raw XML headers. That supports label consistency, not an infallible hierarchy oracle.
 
@@ -61,6 +61,26 @@ The focused PDF delivery passes lint, formatting, fast tests, fail-closed Chromi
 Deferred from #734: non-comma and cross-page wraps, stacked-heading resegmentation, sentence/quote filters, mid-title department recovery, broader agency-scope rules and placement scoring. In particular, NATO still leaks into later housing paths, and unrecovered fragments can still become parents. Recovering a name is not certification of its whole ancestry. The title-case agency-promotion rule that checks following dollar text is explicitly separate and unadopted under ADR 0018. No financial interpretation, totals, views or unrelated XML changes travel with this slice.
 
 Necessary tests and refreshed artifacts travel with the behavior they protect. Extract shared validation machinery only when a real shared need emerges.
+
+### NATO agency scope: bounded finding, not a repaired hierarchy
+
+Bounded finding: [#858](https://github.com/civictechdc/DeltaTrack/pull/858), independently based on merged `develop` at `a4ca7944`. Lint, formatting, fast, fail-closed browser and all CI slow gates, including external validation, pass; the live-network govinfo gate is excluded as in CI. On H.R. 4366, the current breadcrumb carries `NORTH ATLANTIC TREATY ORGANIZATION` over `SECURITY INVESTMENT PROGRAM`, then Base Closure and both Army housing accounts. Exact printed page:line starts in the committed PDFs:
+
+| Version filename | NATO / Security Investment | Base Closure | Housing Construction, Army | Housing Operation and Maintenance, Army |
+|---|---|---|---|---|
+| `1_reported-in-house.pdf` | 9:15 / 9:16 | 10:1 | 10:7 | 10:13 |
+| `2_engrossed-in-house.pdf` | 9:15 / 9:16 | 10:1 | 10:7 | 10:13 |
+| `3_placed-on-calendar-senate.pdf` | 9:7 / 9:8 | 9:18 | 10:1 | 10:7 |
+| `4_engrossed-amendment-senate.pdf` | 14:10 / 14:11 | 14:21 | 15:1 | 15:7 |
+| `5_engrossed-amendment-house.pdf` | 12:7 / 12:8 | 12:18 | 12:23 | 13:4 |
+
+The enrolled print emits no account anchors, so it provides no positive scope result. In the House-reported print, visual inspection of pages 9–12 and extracted geometry show NATO, Security Investment, Base Closure and Army housing in the same centered, title-case small caps, with the same 11.2-point median glyph size. Neither a new level nor a scope terminator is printed before Base Closure. NATO's scope in current output stops at page 10:19's unrecovered Navy construction fragment, which becomes another agency. Later housing accounts inherit that fragment or the Air Force fragment; those are separate deferred segmentation failures, not evidence that NATO was scoped correctly. The comma-wrapped Army account still starts at line 13 and retains line 14.
+
+Matt's source investigation, implementation and review discussion in #734 at `e3d3926` identify the carry-over problem and supply `_agency_reaches`. Its same-style veto stops carry-over beyond the immediately adjacent account, but identical typography does not establish why the first account is a child and a later one is not. The title-case-account veto likewise cannot distinguish these housing accounts from agencies. Do not adopt those rules on XML agreement or synthetic expectations alone. The separate dollar-presence promotion remains excluded under ADR 0018.
+
+Genuine carry-over must survive: H.R. 8752's House-reported print shows Management Directorate at 3:1 over differently styled accounts at 3:2, 3:7 and 3:12; Customs at 11:6 carries through its account at 12:22. Clearing at every account or page would break those relationships. Distinct styles support those examples, but do not provide the missing NATO boundary. No general source-supported repair was established in this slice, including an independently separable partial repair. Preserve the existing reading as requested for ambiguous evidence, explicitly retaining the known leak rather than certifying its ancestry. This is a bounded finding, not a claim that all possible PDF signals are exhausted.
+
+No parser, test, ADR, baseline or rendered artifact changes accompany this finding. Word repair, comma-wrap recovery, source spans, observation identity, block boundaries, matching, breadcrumbs and report references remain unchanged. No new test encodes the desired ancestry as an answer key, and no mutation-control claim is made for a repair that did not ship. Reproduce the visible limitation by self-comparing `tests/corpus/118-hr-4366/1_reported-in-house.pdf` with `uv run python diff_pdf.py <pdf> <pdf> -o <out.html>`, then inspect Full bill navigation for the Army accounts. Revisit only with a named structural signal that distinguishes the boundary while preserving genuine multi-account agencies and declining missing/conflicting evidence.
 
 ### Financial work: learn through complete examples
 
@@ -89,7 +109,7 @@ This is the current shortlist, not a requirement to open another study for every
 | Origin | Intended home | Closure condition |
 |---|---|---|
 | #739 XML headings and useful fixtures | B: merged #856 carries adapted provision examples/investigation/tests with Matt’s coauthor credit; other heading shapes and vehicle fixtures deferred | Source PR already closed upstream; recover or explicitly dispose of remaining contributions independently |
-| #734 typography, heading repairs, examples, placement scorer | C: #857 retains typography, width and standalone evidence; original authorship in `352d0825`, adapted work coauthored in `bf148f6a`; framework, scope rules and scorer deferred | Will reviews/integrates #857; remaining contributions receive their own evidence and disposition, not automatic closure |
+| #734 typography, heading repairs, examples, placement scorer | C: merged #857 retains typography, width and standalone evidence with Matt's author/coauthor credit; NATO scope rules not adopted on current source evidence; other heading passes and scorer deferred | Source PR closed upstream without merging; preserve remaining contributions independently, not as implied integration |
 | #736 source spans, inspectability, coverage and interface investigation | D–F where useful; interface ideas remain candidates until their claims can ship | Retained material is preserved, deferred work has linked homes, and obsolete integration is explicitly superseded |
 
 Preserve original commit authorship where changes carry directly. For substantially adapted contributions, record provenance and appropriate coauthor credit. Credit examples, tests, and investigation as well as production code. Before closing an original PR, link the actual successors or deferred tracking items and explain its disposition. Do not discard valuable work merely to close the stack; do not keep the stack open indefinitely after every contribution has a clear home.
@@ -123,7 +143,7 @@ A new substantive review pass must name a plausible, currently untested failure 
 
 ## Next turn
 
-**Owner: Will reviews [#857](https://github.com/civictechdc/DeltaTrack/pull/857); implementing agent follows up.** Confirm hosted CI and preserve Matt's author/coauthor credit through integration. No further substantive review pass is justified without a named, presently untested failure that could materially change this bounded result. After integration, use a fresh session for a bounded agency-scope repair, starting with the NATO carry-over exposed by H.R. 4366. Require source-based negative controls and do not import the financial-text promotion rule. Alternatively resume the remaining supported XML shapes, explicit container nesting and NATO/FDA chains, retaining occurrence identity. Keep vehicle-fixture work separate from parser correctness and financial readiness. Do not merge or close #734, #739 or #736 as an inferred cleanup step.
+**Owner: Will reviews [#858](https://github.com/civictechdc/DeltaTrack/pull/858) and accepts or redirects the bounded NATO finding; implementing agent resumes a separately selected slice.** Recommended next action: inspect remaining XML container-display recovery against explicit source nesting, retaining occurrence identity. Do not tune the ambiguous PDF NATO breadcrumb or reopen #857 without concrete new evidence. NATO/FDA XML chains, other PDF heading passes and vehicle fixtures remain deferred, not completed by this finding. Financial readiness is unchanged. No original PR was merged or closed by this investigation; do not infer cleanup authority from their current states.
 
 This is the single authoritative repository copy, committed in `plans/` despite that directory's general ignore rule. The prior ignored primary-checkout copy has been moved here, not duplicated. Retire the plan only when its remaining outcomes are delivered or explicitly disposed of.
 
