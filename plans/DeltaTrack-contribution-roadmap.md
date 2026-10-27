@@ -15,6 +15,7 @@ This is a navigation and handoff document, not an implementation specification. 
 - The first XML successor has landed. The next PDF slice is deliberately narrower than #734's heading passes: source-supported comma-ended wrapped account names. Broader XML and PDF recovery remains deferred.
 - Financial research has advanced: #854 fixed the notebook’s Title I shortfall and same-named account merging; #845 improved selection and measurement. Neither establishes all-figure financial readiness.
 - [#856, bounded XML provision headings](https://github.com/civictechdc/DeltaTrack/pull/856) merged as `68946586`, containing `ff5d98f7`. The PDF branch starts from that `develop` commit, not the XML feature branch. Open successors were checked before implementation and again before delivery; none duplicates this slice.
+- [#857, source-supported comma-wrapped PDF account names](https://github.com/civictechdc/DeltaTrack/pull/857) is open against `develop`. Reviewed implementation: `bf148f6a`, with carried typography authored by Matt in `352d0825` and his coauthor credit on the adaptation. All required local gates pass; hosted CI and maintainer review remain the integration gate.
 
 ## Outcomes to track
 
@@ -22,7 +23,7 @@ This is a navigation and handoff document, not an implementation specification. 
 |---|---|---|---|---|
 | A | Agreed financial acceptance boundaries | Adoption recorded separately; no financial shipping approval | Apply the accepted criteria to future financial proposals | #796; `f3e80ffe` |
 | B | Useful XML structure work integrated | Bounded provision-heading successor merged | Recover remaining supported XML shapes independently; source PR closure did not integrate them | Source: #739; successor #856 |
-| C | Useful PDF structure work integrated | Focused comma-wrap successor prepared against current develop | Review/integrate the focused successor, then decide the next source-supported scope repair | Source: #734; successor link added on opening |
+| C | Useful PDF structure work integrated | Focused comma-wrap successor open against current develop | Will reviews #857, then choose the next source-supported scope repair after integration | Source: #734; successor #857 at `bf148f6a` |
 | D | Trustworthy individual financial figures | Existing research provides bounded evidence | Implement and validate one complete mixed-figure example; use what it reveals to choose the next slice | Sources: #736, #845, #854; stage 1 not demonstrated |
 | E | Trustworthy financial totals | Existing rollup research exposes unresolved accounting and scope issues | After per-figure work clarifies the inputs, choose a bounded aggregation claim and test it independently | ADR stage 2; not ready |
 | F | Meaningful cross-version financial changes | Acceptance decision intentionally deferred | After stage 1 ships, settle the paired-change claim and its criteria, then plan implementation | ADR stage 3; not ready |
@@ -84,7 +85,7 @@ This is the current shortlist, not a requirement to open another study for every
 | Origin | Intended home | Closure condition |
 |---|---|---|
 | #739 XML headings and useful fixtures | B: merged #856 carries adapted provision examples/investigation/tests with Matt’s coauthor credit; other heading shapes and vehicle fixtures deferred | Source PR already closed upstream; recover or explicitly dispose of remaining contributions independently |
-| #734 typography, heading repairs, examples, placement scorer | C: focused comma-wrap successor retains typography, width and standalone evidence; framework, scope rules and scorer deferred | Successor lands; remaining contributions receive their own evidence and disposition, not automatic closure |
+| #734 typography, heading repairs, examples, placement scorer | C: #857 retains typography, width and standalone evidence; original authorship in `352d0825`, adapted work coauthored in `bf148f6a`; framework, scope rules and scorer deferred | Will reviews/integrates #857; remaining contributions receive their own evidence and disposition, not automatic closure |
 | #736 source spans, inspectability, coverage and interface investigation | D–F where useful; interface ideas remain candidates until their claims can ship | Retained material is preserved, deferred work has linked homes, and obsolete integration is explicitly superseded |
 
 Preserve original commit authorship where changes carry directly. For substantially adapted contributions, record provenance and appropriate coauthor credit. Credit examples, tests, and investigation as well as production code. Before closing an original PR, link the actual successors or deferred tracking items and explain its disposition. Do not discard valuable work merely to close the stack; do not keep the stack open indefinitely after every contribution has a clear home.
@@ -118,7 +119,7 @@ A new substantive review pass must name a plausible, currently untested failure 
 
 ## Next turn
 
-**Owner: Will reviews the focused PDF successor; implementing agent follows up.** After integration, use a fresh session for a bounded agency-scope repair, starting with the NATO carry-over exposed by H.R. 4366. Require source-based negative controls and do not import the financial-text promotion rule. Alternatively resume the remaining supported XML shapes, explicit container nesting and NATO/FDA chains, retaining occurrence identity. Keep vehicle-fixture work separate from parser correctness and financial readiness. Do not merge or close #734, #739 or #736 as an inferred cleanup step.
+**Owner: Will reviews [#857](https://github.com/civictechdc/DeltaTrack/pull/857); implementing agent follows up.** Confirm hosted CI and preserve Matt's author/coauthor credit through integration. No further substantive review pass is justified without a named, presently untested failure that could materially change this bounded result. After integration, use a fresh session for a bounded agency-scope repair, starting with the NATO carry-over exposed by H.R. 4366. Require source-based negative controls and do not import the financial-text promotion rule. Alternatively resume the remaining supported XML shapes, explicit container nesting and NATO/FDA chains, retaining occurrence identity. Keep vehicle-fixture work separate from parser correctness and financial readiness. Do not merge or close #734, #739 or #736 as an inferred cleanup step.
 
 This is the single authoritative repository copy, committed in `plans/` despite that directory's general ignore rule. The prior ignored primary-checkout copy has been moved here, not duplicated. Retire the plan only when its remaining outcomes are delivered or explicitly disposed of.
 
